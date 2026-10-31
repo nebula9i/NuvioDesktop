@@ -4,6 +4,7 @@ import com.nuvio.app.core.build.AppFeaturePolicy
 import com.nuvio.app.isDesktop
 import com.nuvio.app.features.player.skip.AutoSkipSegmentType
 import com.nuvio.app.features.player.skip.NextEpisodeThresholdMode
+import com.nuvio.app.features.streams.SmartPlayHdrPreference
 import com.nuvio.app.features.streams.StreamAutoPlayMode
 import com.nuvio.app.features.streams.StreamAutoPlaySource
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -75,6 +76,7 @@ data class PlayerSettingsUiState(
     val vodCacheSizeMode: VodCacheSizeMode = VodCacheSizeMode.AUTO,
     val vodCacheSizeMb: Int = VodCacheSizing.DEFAULT_SIZE_MB,
     val streamAutoPlayMode: StreamAutoPlayMode = StreamAutoPlayMode.MANUAL,
+    val smartPlayHdrPreference: SmartPlayHdrPreference = SmartPlayHdrPreference.AUTO,
     val streamAutoPlaySource: StreamAutoPlaySource = StreamAutoPlaySource.ALL_SOURCES,
     val streamAutoPlaySelectedAddons: Set<String> = emptySet(),
     val streamAutoPlaySelectedPlugins: Set<String> = emptySet(),
@@ -162,6 +164,7 @@ object PlayerSettingsRepository {
     private var vodCacheSizeMode = VodCacheSizeMode.AUTO
     private var vodCacheSizeMb = VodCacheSizing.DEFAULT_SIZE_MB
     private var streamAutoPlayMode = StreamAutoPlayMode.MANUAL
+    private var smartPlayHdrPreference = SmartPlayHdrPreference.AUTO
     private var streamAutoPlaySource = StreamAutoPlaySource.ALL_SOURCES
     private var streamAutoPlaySelectedAddons: Set<String> = emptySet()
     private var streamAutoPlaySelectedPlugins: Set<String> = emptySet()
@@ -255,6 +258,7 @@ object PlayerSettingsRepository {
         vodCacheSizeMb = VodCacheSizing.DEFAULT_SIZE_MB
         applyExoPlayerNativeMemory(false)
         streamAutoPlayMode = StreamAutoPlayMode.MANUAL
+        smartPlayHdrPreference = SmartPlayHdrPreference.AUTO
         streamAutoPlaySource = StreamAutoPlaySource.ALL_SOURCES
         streamAutoPlaySelectedAddons = emptySet()
         streamAutoPlaySelectedPlugins = emptySet()
@@ -397,6 +401,9 @@ object PlayerSettingsRepository {
         streamAutoPlayMode = PlayerSettingsStorage.loadStreamAutoPlayMode()
             ?.let { runCatching { StreamAutoPlayMode.valueOf(it) }.getOrNull() }
             ?: StreamAutoPlayMode.MANUAL
+        smartPlayHdrPreference = PlayerSettingsStorage.loadSmartPlayHdrPreference()
+            ?.let { runCatching { SmartPlayHdrPreference.valueOf(it) }.getOrNull() }
+            ?: SmartPlayHdrPreference.AUTO
         streamAutoPlaySource = PlayerSettingsStorage.loadStreamAutoPlaySource()
             ?.let { runCatching { StreamAutoPlaySource.valueOf(it) }.getOrNull() }
             ?: StreamAutoPlaySource.ALL_SOURCES
@@ -874,6 +881,14 @@ object PlayerSettingsRepository {
         PlayerSettingsStorage.saveStreamAutoPlayMode(mode.name)
     }
 
+    fun setSmartPlayHdrPreference(preference: SmartPlayHdrPreference) {
+        ensureLoaded()
+        if (smartPlayHdrPreference == preference) return
+        smartPlayHdrPreference = preference
+        publish()
+        PlayerSettingsStorage.saveSmartPlayHdrPreference(preference.name)
+    }
+
     fun setStreamAutoPlaySource(source: StreamAutoPlaySource) {
         ensureLoaded()
         val normalizedSource = normalizeStreamAutoPlaySource(source)
@@ -1277,6 +1292,7 @@ object PlayerSettingsRepository {
             vodCacheSizeMode = vodCacheSizeMode,
             vodCacheSizeMb = vodCacheSizeMb,
             streamAutoPlayMode = streamAutoPlayMode,
+            smartPlayHdrPreference = smartPlayHdrPreference,
             streamAutoPlaySource = streamAutoPlaySource,
             streamAutoPlaySelectedAddons = streamAutoPlaySelectedAddons,
             streamAutoPlaySelectedPlugins = streamAutoPlaySelectedPlugins,

@@ -122,6 +122,31 @@ data class PlayerControlsState(
     val subtitlesLabel: String = "Subs",
     val audioLabel: String = "Audio",
     val sourcesLabel: String = "Sources",
+    val quickSettingsLabel: String = "Settings",
+    val qualityLabel: String = "Quality",
+    val qualityAutoLabel: String = "Auto",
+    val currentQualityLabel: String = "",
+    val qualityUnavailableLabel: String = "No quality options found",
+    val sourcesLoadingLabel: String = "Finding sources…",
+    val audioChangeLabel: String = "Change audio track",
+    val hdrLabel: String = "HDR",
+    val hdrAutoLabel: String = "Auto",
+    val hdrPreferLabel: String = "Prefer HDR",
+    val hdrSdrLabel: String = "Prefer SDR",
+    val fileLabel: String = "File",
+    val ignoreFileLabel: String = "Ignore this file",
+    val ignoreFileDescription: String = "Hide it from future source lists for this episode.",
+    val ignoredFilesLabel: String = "Ignored files",
+    val ignoredFilesDescription: String = "Restore a file you ignored by accident.",
+    val ignoredFilesEmptyLabel: String = "No ignored files.",
+    val restoreLabel: String = "Restore",
+    val fileIgnoredLabel: String = "File ignored",
+    val fileRestoredLabel: String = "File restored",
+    val qualityOptions: List<PlayerControlQualityOption> = emptyList(),
+    val selectedQualityHeight: Int = 0,
+    val currentQualityHeight: Int = 0,
+    val hdrPreference: Int = 0,
+    val ignoredItems: List<PlayerControlIgnoredItem> = emptyList(),
     val episodesLabel: String = "Episodes",
     val externalPlayerLabel: String = "External",
     val playLabel: String = "Play",
@@ -319,6 +344,16 @@ data class PlayerControlFilterItem(
     val isSelected: Boolean = false,
     val isLoading: Boolean = false,
     val hasError: Boolean = false,
+)
+
+data class PlayerControlQualityOption(
+    val height: Int = 0,
+    val label: String = "",
+)
+
+data class PlayerControlIgnoredItem(
+    val label: String = "",
+    val subtitle: String = "",
 )
 
 data class PlayerControlSeasonItem(

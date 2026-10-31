@@ -12,10 +12,13 @@ import com.nuvio.app.features.downloads.DownloadItem
 import com.nuvio.app.features.downloads.DownloadsRepository
 import com.nuvio.app.features.player.skip.NextEpisodeInfo
 import com.nuvio.app.features.player.skip.PlayerNextEpisodeRules
+import com.nuvio.app.features.streams.IgnoredStreamsRepository
 import com.nuvio.app.features.streams.StreamAutoPlayMode
 import com.nuvio.app.features.streams.StreamAutoPlaySelector
 import com.nuvio.app.features.streams.StreamAutoPlaySource
 import com.nuvio.app.features.streams.StreamItem
+import com.nuvio.app.features.streams.currentSmartPlayContext
+import com.nuvio.app.features.streams.mismatchesRequestedContent
 import com.nuvio.app.features.watching.domain.isShortPlaceholderDuration
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -201,9 +204,26 @@ internal fun CoroutineScope.launchPlayerNextEpisodeAutoPlay(
             settleAutoSelect()
         }
 
+        val smartPlayContext = if (effectiveMode == StreamAutoPlayMode.SMART_PLAY) {
+            currentSmartPlayContext(settings.smartPlayHdrPreference)
+        } else {
+            null
+        }
+
+        fun eligibleStreams(streams: List<StreamItem>): List<StreamItem> = streams
+            .filterNot {
+                it.mismatchesRequestedContent(
+                    contentType = type,
+                    season = nextVideo.season,
+                    episode = nextVideo.episode,
+                    expectedRuntimeMinutes = null,
+                )
+            }
+            .filterNot { IgnoredStreamsRepository.isIgnored(it, nextVideo.id) }
+
         fun trySelectStream(streams: List<StreamItem>): StreamItem? =
             StreamAutoPlaySelector.selectAutoPlayStream(
-                streams = streams,
+                streams = eligibleStreams(streams),
                 mode = effectiveMode,
                 regexPattern = effectiveRegex,
                 source = effectiveSource,
@@ -215,12 +235,13 @@ internal fun CoroutineScope.launchPlayerNextEpisodeAutoPlay(
                 bingeGroupOnly = bingeGroupOnlyManualMode,
                 debridEnabled = debridSettings.canResolvePlayableLinks,
                 activeResolverProviderId = debridSettings.activeResolverProviderId,
+                smartPlayContext = smartPlayContext,
             )
 
         fun tryBingeGroupOnly(streams: List<StreamItem>): StreamItem? {
             if (preferredBingeGroup == null || !settings.streamAutoPlayPreferBingeGroup) return null
             return StreamAutoPlaySelector.selectAutoPlayStream(
-                streams = streams,
+                streams = eligibleStreams(streams),
                 mode = effectiveMode,
                 regexPattern = effectiveRegex,
                 source = effectiveSource,
@@ -232,6 +253,7 @@ internal fun CoroutineScope.launchPlayerNextEpisodeAutoPlay(
                 bingeGroupOnly = true,
                 debridEnabled = debridSettings.canResolvePlayableLinks,
                 activeResolverProviderId = debridSettings.activeResolverProviderId,
+                smartPlayContext = smartPlayContext,
             )
         }
 

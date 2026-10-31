@@ -93,6 +93,12 @@ const speedOptionList = document.getElementById("speedOptionList");
 const speedPanelTitle = document.getElementById("speedPanelTitle");
 const audioPanelTitle = document.getElementById("audioPanelTitle");
 const audioTrackList = document.getElementById("audioTrackList");
+const quickSettingsButton = document.getElementById("quickSettingsButton");
+const quickSettingsLabel = document.getElementById("quickSettingsLabel");
+const quickSettingsModal = document.getElementById("quickSettingsModal");
+const quickSettingsPanelTitle = document.getElementById("quickSettingsPanelTitle");
+const quickSettingsBody = document.getElementById("quickSettingsBody");
+const quickSettingsCloseButton = document.getElementById("quickSettingsCloseButton");
 const subtitleTrackList = document.getElementById("subtitleTrackList");
 const subtitlePanelTitle = document.getElementById("subtitlePanelTitle");
 const subtitleLanguageRailTitle = document.getElementById("subtitleLanguageRailTitle");
@@ -233,6 +239,31 @@ let state = {
   subtitlesLabel: "Subs",
   audioLabel: "Audio",
   sourcesLabel: "Sources",
+  quickSettingsLabel: "Settings",
+  qualityLabel: "Quality",
+  qualityAutoLabel: "Auto",
+  currentQualityLabel: "",
+  qualityUnavailableLabel: "No quality options found",
+  sourcesLoadingLabel: "Finding sources…",
+  audioChangeLabel: "Change audio track",
+  hdrLabel: "HDR",
+  hdrAutoLabel: "Auto",
+  hdrPreferLabel: "Prefer HDR",
+  hdrSdrLabel: "Prefer SDR",
+  fileLabel: "File",
+  ignoreFileLabel: "Ignore this file",
+  ignoreFileDescription: "Hide it from future source lists for this episode.",
+  ignoredFilesLabel: "Ignored files",
+  ignoredFilesDescription: "Restore a file you ignored by accident.",
+  ignoredFilesEmptyLabel: "No ignored files.",
+  restoreLabel: "Restore",
+  fileIgnoredLabel: "File ignored",
+  fileRestoredLabel: "File restored",
+  qualityOptions: [],
+  selectedQualityHeight: 0,
+  currentQualityHeight: 0,
+  hdrPreference: 0,
+  ignoredItems: [],
   episodesLabel: "Episodes",
   externalPlayerLabel: "External",
   playLabel: "Play",
@@ -1016,6 +1047,7 @@ const rangePositionMs = () => {
 
 const modalByName = {
   audio: audioModal,
+  quickSettings: quickSettingsModal,
   subtitles: subtitleModal,
   speed: speedModal,
   sources: sourceModal,
@@ -2414,8 +2446,171 @@ const renderChapterMarks = () => {
   setText(chapterTitle, index >= 0 ? chapters[index].title : "");
 };
 
+const quickSettingsSection = title => {
+  const section = document.createElement("div");
+  section.className = "quick-settings-section";
+  const heading = document.createElement("div");
+  heading.className = "quick-settings-title";
+  heading.textContent = title;
+  section.appendChild(heading);
+  return section;
+};
+
+const quickSettingsChips = () => {
+  const row = document.createElement("div");
+  row.className = "quick-settings-chips";
+  return row;
+};
+
+const quickSettingsChip = (label, selected, onClick) => {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = `segment-button${selected ? " selected" : ""}`;
+  chip.textContent = label;
+  chip.addEventListener("click", event => {
+    event.stopPropagation();
+    onClick();
+  });
+  return chip;
+};
+
+const quickSettingsRow = (title, subtitle, onClick) => {
+  const row = document.createElement("div");
+  row.className = "track-row quick-settings-row";
+  row.setAttribute("role", "button");
+  row.tabIndex = 0;
+  row.addEventListener("click", event => {
+    event.stopPropagation();
+    onClick();
+  });
+  const copy = document.createElement("div");
+  copy.className = "quick-settings-copy";
+  const name = document.createElement("div");
+  name.className = "quick-settings-row-title";
+  name.textContent = title;
+  copy.appendChild(name);
+  if (subtitle) {
+    const sub = document.createElement("div");
+    sub.className = "quick-settings-row-subtitle";
+    sub.textContent = subtitle;
+    copy.appendChild(sub);
+  }
+  row.appendChild(copy);
+  return row;
+};
+
+const quickSettingsNote = text => {
+  const note = document.createElement("div");
+  note.className = "quick-settings-note";
+  note.textContent = text;
+  return note;
+};
+
+const renderQuickSettingsModal = () => {
+  quickSettingsPanelTitle.textContent = state.quickSettingsLabel || "Settings";
+  const options = Array.isArray(state.qualityOptions) ? state.qualityOptions : [];
+  const ignored = Array.isArray(state.ignoredItems) ? state.ignoredItems : [];
+  const selectedHeight = Number(state.selectedQualityHeight) || 0;
+  const signature = JSON.stringify([
+    options.map(option => [Number(option.height) || 0, String(option.label || "")]),
+    selectedHeight,
+    String(state.currentQualityLabel || ""),
+    Boolean(state.sourceIsLoading),
+    Number(state.hdrPreference) || 0,
+    ignored.map(item => [String(item.label || ""), String(item.subtitle || "")]),
+  ]);
+  if (quickSettingsBody.dataset.signature === signature) return;
+  quickSettingsBody.dataset.signature = signature;
+  quickSettingsBody.textContent = "";
+
+  const qualitySection = quickSettingsSection(state.qualityLabel || "Quality");
+  const qualityChips = quickSettingsChips();
+  qualityChips.appendChild(quickSettingsChip(state.qualityAutoLabel || "Auto", selectedHeight === 0, () => {
+    send("selectQuality", 0);
+    closePlayerModal(false);
+  }));
+  options.forEach(option => {
+    const height = Number(option.height) || 0;
+    if (!height) return;
+    qualityChips.appendChild(quickSettingsChip(String(option.label || `${height}p`), selectedHeight === height, () => {
+      send("selectQuality", height);
+      closePlayerModal(false);
+    }));
+  });
+  qualitySection.appendChild(qualityChips);
+  if (state.sourceIsLoading) {
+    qualitySection.appendChild(quickSettingsNote(state.sourcesLoadingLabel || "Finding sources…"));
+  } else if (!options.length) {
+    qualitySection.appendChild(quickSettingsNote(state.qualityUnavailableLabel || "No quality options found"));
+  } else if (state.currentQualityLabel) {
+    qualitySection.appendChild(quickSettingsNote(state.currentQualityLabel));
+  }
+  quickSettingsBody.appendChild(qualitySection);
+
+  const audioSection = quickSettingsSection(state.audioTracksPanelTitle || "Audio");
+  audioSection.appendChild(quickSettingsRow(state.audioChangeLabel || "Change audio track", "", () => {
+    closePlayerModal(false);
+    openPlayerModal("audio");
+  }));
+  quickSettingsBody.appendChild(audioSection);
+
+  const hdrSection = quickSettingsSection(state.hdrLabel || "HDR");
+  const hdrChips = quickSettingsChips();
+  const hdrPreference = Number(state.hdrPreference) || 0;
+  [
+    [state.hdrAutoLabel || "Auto", 0],
+    [state.hdrPreferLabel || "Prefer HDR", 1],
+    [state.hdrSdrLabel || "Prefer SDR", 2],
+  ].forEach(([label, value]) => {
+    hdrChips.appendChild(quickSettingsChip(label, hdrPreference === value, () => {
+      send("setHdrPreference", value);
+    }));
+  });
+  hdrSection.appendChild(hdrChips);
+  quickSettingsBody.appendChild(hdrSection);
+
+  const fileSection = quickSettingsSection(state.fileLabel || "File");
+  fileSection.appendChild(quickSettingsRow(
+    state.ignoreFileLabel || "Ignore this file",
+    state.ignoreFileDescription || "",
+    () => {
+      send("ignoreFile", 0);
+      showPlayerToast(state.fileIgnoredLabel || "File ignored");
+      closePlayerModal(false);
+    },
+  ));
+  fileSection.appendChild(quickSettingsNote(state.ignoredFilesLabel || "Ignored files"));
+  if (!ignored.length) {
+    fileSection.appendChild(quickSettingsNote(state.ignoredFilesEmptyLabel || "No ignored files."));
+  } else {
+    ignored.forEach((item, index) => {
+      const row = quickSettingsRow(
+        String(item.label || "Stream"),
+        String(item.subtitle || ""),
+        () => {
+          send("restoreIgnored", index);
+          showPlayerToast(state.fileRestoredLabel || "File restored");
+        },
+      );
+      const restore = document.createElement("button");
+      restore.type = "button";
+      restore.className = "panel-button";
+      restore.textContent = state.restoreLabel || "Restore";
+      restore.addEventListener("click", event => {
+        event.stopPropagation();
+        send("restoreIgnored", index);
+        showPlayerToast(state.fileRestoredLabel || "File restored");
+      });
+      row.appendChild(restore);
+      fileSection.appendChild(row);
+    });
+  }
+  quickSettingsBody.appendChild(fileSection);
+};
+
 const renderActiveModal = (modalOpened = false) => {
   if (activeModal === "audio") renderAudioTrackList();
+  if (activeModal === "quickSettings") renderQuickSettingsModal();
   if (activeModal === "subtitles") renderSubtitleModal();
   if (activeModal === "speed") renderSpeedOptionList();
   if (activeModal === "sources") renderSourceModal(modalOpened);
@@ -2776,12 +2971,14 @@ const renderChrome = () => {
   speedLabel.textContent = state.playbackSpeedLabel || "1x";
   subtitlesLabel.textContent = state.subtitlesLabel || "Subs";
   audioLabel.textContent = state.audioLabel || "Audio";
+  quickSettingsLabel.textContent = state.quickSettingsLabel || "Settings";
   sourcesLabel.textContent = state.sourcesLabel || "Sources";
   episodesLabel.textContent = state.episodesLabel || "Episodes";
   setActionButtonLabel("resize", state.resizeModeLabel || "Fit");
   setActionButtonLabel("speed", state.playbackSpeedLabel || "1x");
   setActionButtonLabel("subtitles", state.subtitlesLabel || "Subs");
   setActionButtonLabel("audio", state.audioLabel || "Audio");
+  setActionButtonLabel("quickSettings", state.quickSettingsLabel || "Settings");
   setActionButtonLabel("sources", state.sourcesLabel || "Sources");
   setActionButtonLabel("episodes", state.episodesLabel || "Episodes");
   if (pipButton) {
@@ -3201,6 +3398,11 @@ document.querySelectorAll("[data-command]").forEach(button => {
       openPlayerModal("audio");
       return;
     }
+    if (command === "quickSettings") {
+      openPlayerModal("quickSettings");
+      send("quickSettings", 0);
+      return;
+    }
     if (command === "subtitles") {
       openPlayerModal("subtitles");
       return;
@@ -3402,6 +3604,10 @@ sourceList.addEventListener("scroll", () => {
   }
 }, { passive: true });
 chaptersCloseButton.addEventListener("click", event => {
+  event.stopPropagation();
+  closePlayerModal();
+});
+quickSettingsCloseButton.addEventListener("click", event => {
   event.stopPropagation();
   closePlayerModal();
 });

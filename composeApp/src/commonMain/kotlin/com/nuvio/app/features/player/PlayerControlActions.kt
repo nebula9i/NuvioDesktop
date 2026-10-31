@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.SwapHoriz
@@ -111,6 +112,7 @@ internal fun PlayerControlActions(
     resizeMode: PlayerResizeMode,
     onSubtitleClick: () -> Unit,
     onAudioClick: () -> Unit,
+    onQuickSettingsClick: (() -> Unit)? = null,
     onSourcesClick: (() -> Unit)?,
     onEpisodesClick: (() -> Unit)?,
     onChaptersClick: (() -> Unit)?,
@@ -128,6 +130,7 @@ internal fun PlayerControlActions(
         resizeMode = resizeMode,
         onSubtitleClick = onSubtitleClick,
         onAudioClick = onAudioClick,
+        onQuickSettingsClick = onQuickSettingsClick,
         onSourcesClick = onSourcesClick,
         onEpisodesClick = onEpisodesClick,
         onChaptersClick = onChaptersClick,
@@ -229,6 +232,7 @@ internal fun playerControlActions(
     resizeMode: PlayerResizeMode,
     onSubtitleClick: () -> Unit,
     onAudioClick: () -> Unit,
+    onQuickSettingsClick: (() -> Unit)? = null,
     onSourcesClick: (() -> Unit)?,
     onEpisodesClick: (() -> Unit)?,
     onChaptersClick: (() -> Unit)?,
@@ -255,6 +259,12 @@ internal fun playerControlActions(
             stringResource(Res.string.compose_player_audio), onAudioClick,
             painter = appIconPainter(AppIconResource.PlayerAudioFilled),
         ),
+        onQuickSettingsClick?.let {
+            PlayerControlAction(
+                stringResource(Res.string.player_quick_settings), it,
+                icon = Icons.Rounded.Settings,
+            )
+        },
         onChaptersClick?.let {
             PlayerControlAction(
                 stringResource(Res.string.compose_player_chapters), it,

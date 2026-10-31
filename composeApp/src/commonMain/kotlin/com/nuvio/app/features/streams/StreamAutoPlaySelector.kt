@@ -50,6 +50,7 @@ object StreamAutoPlaySelector {
         bingeGroupOnly: Boolean = false,
         debridEnabled: Boolean = true,
         activeResolverProviderId: String? = null,
+        smartPlayContext: SmartPlayContext? = null,
     ): StreamItem? =
         evaluateAutoPlayStream(
             streams = streams,
@@ -64,6 +65,7 @@ object StreamAutoPlaySelector {
             bingeGroupOnly = bingeGroupOnly,
             debridEnabled = debridEnabled,
             activeResolverProviderId = activeResolverProviderId,
+            smartPlayContext = smartPlayContext,
         ).stream
 
     fun evaluateAutoPlayStream(
@@ -79,6 +81,7 @@ object StreamAutoPlaySelector {
         bingeGroupOnly: Boolean = false,
         debridEnabled: Boolean = true,
         activeResolverProviderId: String? = null,
+        smartPlayContext: SmartPlayContext? = null,
     ): StreamAutoPlayEvaluation {
         if (streams.isEmpty()) return StreamAutoPlayEvaluation()
 
@@ -125,7 +128,11 @@ object StreamAutoPlaySelector {
         if (mode == StreamAutoPlayMode.MANUAL) {
             return StreamAutoPlayEvaluation()
         }
-        val preferredStream = if (preferBingeGroupInSelection && targetBingeGroup.isNotEmpty()) {
+        val preferredStream = if (
+            mode != StreamAutoPlayMode.SMART_PLAY &&
+            preferBingeGroupInSelection &&
+            targetBingeGroup.isNotEmpty()
+        ) {
             candidateStreams.firstOrNull { stream ->
                 stream.behaviorHints.bingeGroup == targetBingeGroup &&
                     stream.isAutoPlayable(debridEnabled, activeResolverProviderId)
@@ -177,6 +184,15 @@ object StreamAutoPlaySelector {
                     true
                 }
             }
+            StreamAutoPlayMode.SMART_PLAY -> SmartPlayPolicy.rankSmart(
+                streams = candidateStreams,
+                context = smartPlayContext ?: SmartPlayContext(
+                    displayMaxHeightPx = 0,
+                    downloadMbps = null,
+                ),
+                preferredBingeGroup = targetBingeGroup.takeIf { preferBingeGroupInSelection },
+                debridEnabled = debridEnabled,
+            )
         }
         if (matchingStreams.isEmpty() && preferredStream == null) return StreamAutoPlayEvaluation()
 

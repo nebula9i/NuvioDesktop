@@ -41,6 +41,10 @@ internal fun PlayerScreenRuntime.updatePlaybackSnapshot(
     }
     playbackSnapshotKey = playbackKey
     playbackSnapshotMark = TimeSource.Monotonic.markNow()
+    if (!snapshot.isLoading && initialSeekApplied && !isSourceSwitchInProgress) {
+        lastStablePositionMs = snapshot.positionMs.coerceAtLeast(0L)
+    }
+    trackStallDowngrade(playbackSnapshot)
     val targetPositionMs = scrubbingPositionMs ?: return true
     if (!isScrubbingTimeline && (
             !snapshot.isLoading || snapshot.isEnded ||

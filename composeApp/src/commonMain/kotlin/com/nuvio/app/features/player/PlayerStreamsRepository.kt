@@ -16,6 +16,7 @@ import com.nuvio.app.features.plugins.PluginsUiState
 import com.nuvio.app.features.plugins.pluginContentId
 import com.nuvio.app.features.servers.ServerStreams
 import com.nuvio.app.features.streams.AddonStreamGroup
+import com.nuvio.app.features.streams.IgnoredStreamsRepository
 import com.nuvio.app.features.streams.InstalledStreamAddonTarget
 import com.nuvio.app.features.streams.StreamAutoPlaySelector
 import com.nuvio.app.features.streams.StreamBadgePresentation
@@ -159,6 +160,15 @@ object PlayerStreamsRepository {
         _sourceState.update { it.copy(selectedFilter = addonId) }
     }
 
+    fun filterIgnored(videoId: String) {
+        IgnoredStreamsRepository.ensureLoaded()
+        val filter: (AddonStreamGroup) -> AddonStreamGroup = { group ->
+            group.copy(streams = group.streams.filterNot { IgnoredStreamsRepository.isIgnored(it, videoId) })
+        }
+        _sourceState.update { current -> current.copy(groups = current.groups.map(filter)) }
+        _episodeStreamsState.update { current -> current.copy(groups = current.groups.map(filter)) }
+    }
+
     fun selectEpisodeStreamsFilter(addonId: String?) {
         _episodeStreamsState.update { it.copy(selectedFilter = addonId) }
     }
@@ -199,6 +209,7 @@ object PlayerStreamsRepository {
         }
         val requestKey = "$type::$videoId::$season::$episode::pluginsGrouped=${pluginUiState.groupStreamsByRepository}"
         PluginRepository.setLocalPluginSearchPaused(false)
+        IgnoredStreamsRepository.ensureLoaded()
         val current = stateFlow.value
         val cachedKey = requestKeyHolder()
         if (
@@ -217,6 +228,7 @@ object PlayerStreamsRepository {
 
         val streamBadgeRules = StreamBadgeSettingsRepository.snapshot()
         val embeddedStreams = MetaDetailsRepository.findEmbeddedStreams(videoId)
+            .filterNot { IgnoredStreamsRepository.isIgnored(it, videoId) }
         if (embeddedStreams.isNotEmpty()) {
             log.d { "using embedded $panelName request=$requestKey streams=${embeddedStreams.size}" }
             val group = AddonStreamGroup(
@@ -334,10 +346,13 @@ object PlayerStreamsRepository {
             }
 
             fun presentStreamGroup(group: AddonStreamGroup): AddonStreamGroup {
+                val visibleGroup = group.copy(
+                    streams = group.streams.filterNot { IgnoredStreamsRepository.isIgnored(it, videoId) },
+                )
                 val badgeGroup = StreamBadgePresentation.apply(
-                    groups = listOf(group),
+                    groups = listOf(visibleGroup),
                     rules = streamBadgeRules,
-                ).firstOrNull() ?: group
+                ).firstOrNull() ?: visibleGroup
                 return DebridStreamPresentation.apply(
                     groups = listOf(badgeGroup),
                     settings = debridSettings,

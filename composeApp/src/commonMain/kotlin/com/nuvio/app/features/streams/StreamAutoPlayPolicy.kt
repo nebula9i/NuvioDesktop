@@ -11,6 +11,7 @@ object StreamAutoPlayPolicy {
             StreamAutoPlayMode.MANUAL -> false
             StreamAutoPlayMode.FIRST_STREAM -> true
             StreamAutoPlayMode.REGEX_MATCH -> isRegexSelectionConfigured(settings.streamAutoPlayRegex)
+            StreamAutoPlayMode.SMART_PLAY -> true
         }
     }
 

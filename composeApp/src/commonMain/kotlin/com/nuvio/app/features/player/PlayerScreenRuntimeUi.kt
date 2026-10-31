@@ -11,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -43,9 +44,12 @@ import com.nuvio.app.features.p2p.formatP2pMegabytes
 import com.nuvio.app.features.p2p.formatP2pSpeed
 import com.nuvio.app.features.player.skip.SkipIntroRepository
 import com.nuvio.app.features.streams.AddonStreamGroup
+import com.nuvio.app.features.streams.IgnoredStreamsRepository
+import com.nuvio.app.features.streams.SmartPlayHdrPreference
 import com.nuvio.app.features.streams.StreamBadgeSettingsRepository
 import com.nuvio.app.features.streams.StreamItem
 import com.nuvio.app.features.streams.isSelectableForPlayback
+import com.nuvio.app.features.streams.streamQuality
 import com.nuvio.app.features.watchprogress.buildPlaybackVideoId
 import com.nuvio.app.features.watching.application.WatchingState
 import com.nuvio.app.features.autosync.AutoSyncSyncedSubtitle
@@ -71,6 +75,8 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
         onDispose { systemBackRegistration(null) }
     }
     val isInPip = rememberIsInPictureInPicture()
+    remember { IgnoredStreamsRepository.ensureLoaded() }
+    val ignoredEntries by IgnoredStreamsRepository.entries.collectAsStateWithLifecycle()
     val displayedPositionMs = scrubbingPositionMs ?: playbackSnapshot.positionMs
     val seasonNumber = activeSeasonNumber
     val episodeNumber = activeEpisodeNumber
@@ -199,6 +205,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
     )
     val openingOverlayWanted = playerSettingsUiState.showLoadingOverlay &&
         !initialLoadCompleted &&
+        !isSourceSwitchInProgress &&
         errorMessage == null
     val episodeText = if (seasonNumber != null && episodeNumber != null && !episodeTitle.isNullOrBlank()) {
         stringResource(
@@ -296,6 +303,15 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
             title = chapter.title ?: stringResource(Res.string.compose_player_chapter_number, index + 1),
         )
     }
+    val currentQualityHeight = playbackSnapshot.videoHeight.takeIf { it > 0 }
+        ?: activeStream?.streamQuality()?.height
+    val qualityHeights = (
+        sourceStreamsState.groups.flatMap { it.streams }.mapNotNull { it.streamQuality().height } +
+            listOfNotNull(currentQualityHeight)
+        )
+        .filter { it > 0 }
+        .distinct()
+        .sortedDescending()
     val playerControlsState = PlayerControlsState(
         chapters = controlChapters,
         chaptersLabel = stringResource(Res.string.compose_player_chapters),
@@ -325,6 +341,44 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
         subtitlesLabel = stringResource(Res.string.compose_player_subs),
         audioLabel = stringResource(Res.string.compose_player_audio),
         sourcesLabel = stringResource(Res.string.compose_player_sources),
+        quickSettingsLabel = stringResource(Res.string.player_quick_settings),
+        qualityLabel = stringResource(Res.string.player_quality),
+        qualityAutoLabel = stringResource(Res.string.player_quality_auto),
+        currentQualityLabel = currentQualityHeight
+            ?.takeIf { it > 0 }
+            ?.let { stringResource(Res.string.player_quality_current, qualityLabel(it)) }
+            .orEmpty(),
+        qualityUnavailableLabel = stringResource(Res.string.player_quality_unavailable),
+        sourcesLoadingLabel = stringResource(Res.string.player_sources_loading),
+        audioChangeLabel = stringResource(Res.string.player_audio_change),
+        hdrLabel = stringResource(Res.string.player_hdr),
+        hdrAutoLabel = stringResource(Res.string.player_hdr_auto),
+        hdrPreferLabel = stringResource(Res.string.player_hdr_prefer),
+        hdrSdrLabel = stringResource(Res.string.player_hdr_sdr),
+        fileLabel = stringResource(Res.string.player_file),
+        ignoreFileLabel = stringResource(Res.string.player_ignore_file),
+        ignoreFileDescription = stringResource(Res.string.player_ignore_file_description),
+        ignoredFilesLabel = stringResource(Res.string.player_ignored_files_count, ignoredEntries.size),
+        ignoredFilesDescription = stringResource(Res.string.player_ignored_files_description),
+        ignoredFilesEmptyLabel = stringResource(Res.string.player_ignored_files_empty),
+        restoreLabel = stringResource(Res.string.player_restore),
+        fileIgnoredLabel = stringResource(Res.string.player_file_ignored),
+        fileRestoredLabel = stringResource(Res.string.player_file_restored),
+        qualityOptions = qualityHeights.map { height ->
+            PlayerControlQualityOption(height = height, label = qualityLabel(height))
+        },
+        selectedQualityHeight = quickSettingsQualityOverride ?: 0,
+        currentQualityHeight = currentQualityHeight ?: 0,
+        hdrPreference = playerSettingsUiState.smartPlayHdrPreference.ordinal,
+        ignoredItems = ignoredEntries.map { entry ->
+            PlayerControlIgnoredItem(
+                label = entry.label,
+                subtitle = listOfNotNull(
+                    entry.addonName?.takeIf { it.isNotBlank() },
+                    entry.contentTitle?.takeIf { it.isNotBlank() },
+                ).joinToString(" · "),
+            )
+        },
         episodesLabel = stringResource(Res.string.compose_player_episodes),
         externalPlayerLabel = stringResource(Res.string.streams_open_external_player),
         playLabel = stringResource(Res.string.detail_btn_play),
@@ -651,7 +705,10 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
                 onSnapshot = { snapshot ->
                     if (!updatePlaybackSnapshot(snapshot)) return@PlatformPlayerSurface
                     refreshAudioTracksIfChanged()
-                    if (!snapshot.isLoading) initialLoadCompleted = true
+                    if (!snapshot.isLoading) {
+                        initialLoadCompleted = true
+                        completeSourceSwitchIfStarted(snapshot)
+                    }
                     if (snapshot.isEnded) {
                         shouldPlay = false
                         controlsVisible = !playerControlsLocked
@@ -662,6 +719,9 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
                         return@PlatformPlayerSurface
                     }
                     if (message != null && !isDesktop && maybeFailoverPlaybackEngine(resolvedAutoEngine)) {
+                        return@PlatformPlayerSurface
+                    }
+                    if (message != null && tryHandleQualitySwitchFailure()) {
                         return@PlatformPlayerSurface
                     }
                     errorMessage = message
@@ -819,6 +879,7 @@ private fun PlayerScreenRuntime.RenderPlayerControls(
                 refreshTracks()
                 showAudioModal = true
             },
+            onQuickSettingsClick = { openQuickSettings() },
             onVideoSettingsClick = if (isIos) {
                 {
                     showVideoSettingsModal = true
@@ -1051,6 +1112,22 @@ internal fun PlayerScreenRuntime.handlePlayerControlsEvent(type: String, value: 
         "keepChromeVisible" -> {
             controlsVisible = true
             controlsActivityTick += 1
+        }
+        "quickSettings" -> loadQuickSettingsSources()
+        "selectQuality" -> selectQuality(value.toInt().takeIf { it > 0 })
+        "setHdrPreference" -> {
+            val preference = when (value.toInt()) {
+                1 -> SmartPlayHdrPreference.PREFER_HDR
+                2 -> SmartPlayHdrPreference.PREFER_SDR
+                else -> SmartPlayHdrPreference.AUTO
+            }
+            PlayerSettingsRepository.setSmartPlayHdrPreference(preference)
+        }
+        "ignoreFile" -> ignoreActiveFile()
+        "restoreIgnored" -> {
+            IgnoredStreamsRepository.entries.value
+                .getOrNull(value.toInt())
+                ?.let(IgnoredStreamsRepository::restore)
         }
         "setPlaybackState",
         "setPlaybackStateQuiet" -> {
@@ -1868,6 +1945,7 @@ private fun BoxScope.RenderPlaybackOverlays(
             onUnlock = { unlockPlayerControls() },
             showOpeningOverlay = playerSettingsUiState.showLoadingOverlay &&
                 !initialLoadCompleted &&
+                !isSourceSwitchInProgress &&
                 errorMessage == null &&
                 !suppressOpeningOverlay,
             backdropArtwork = background ?: poster,
@@ -1916,10 +1994,31 @@ private fun BoxScope.RenderPlaybackOverlays(
             onDismissError = { requestBack() },
         )
     }
+
+    val stallTargetHeight = runtime.stallDowngradeTargetHeight
+    if (runtime.showStallDowngradeOffer && stallTargetHeight != null && runtime.errorMessage == null) {
+        PlayerStallDowngradeOverlay(
+            targetHeight = stallTargetHeight,
+            switching = runtime.stallDowngradeInProgress,
+            onSwitch = { runtime.requestLowerQuality() },
+            onDismiss = { runtime.showStallDowngradeOffer = false },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = runtime.sliderEdgePadding, bottom = runtime.overlayBottomPadding),
+        )
+    }
+}
+
+private fun qualityLabel(height: Int): String = when {
+    height >= 2160 -> "4K"
+    height >= 1440 -> "1440p"
+    else -> "${height}p"
 }
 
 @Composable
 private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMs: Long) {
+    PlayerQuickSettingsPanel()
+    PlayerIgnoredFilesPanel()
     PlayerChaptersPanel(
         visible = showChaptersPanel && chapters.isNotEmpty(),
         chapters = chapters,
@@ -2022,7 +2121,10 @@ private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMs: Long) {
         activeSourceUrl = activeSourceUrl,
         activeStreamTitle = activeStreamTitle,
         onSourceFilterSelected = PlayerStreamsRepository::selectSourceFilter,
-        onSourceStreamSelected = { stream -> switchToSource(stream) },
+        onSourceStreamSelected = { stream ->
+            clearQualitySwitchState()
+            switchToSource(stream)
+        },
         onReloadSources = {
             val vid = activeVideoId
             if (vid != null) {

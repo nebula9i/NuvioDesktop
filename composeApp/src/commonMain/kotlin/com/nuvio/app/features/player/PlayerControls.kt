@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.Forward10
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Replay10
+import androidx.compose.material.icons.rounded.Settings
 import com.nuvio.app.core.ui.NuvioLoadingIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -116,6 +117,7 @@ internal fun PlayerControlsShell(
     onSpeedClick: () -> Unit,
     onSubtitleClick: () -> Unit,
     onAudioClick: () -> Unit,
+    onQuickSettingsClick: (() -> Unit)? = null,
     onVideoSettingsClick: (() -> Unit)? = null,
     onSourcesClick: (() -> Unit)? = null,
     onEpisodesClick: (() -> Unit)? = null,
@@ -161,6 +163,7 @@ internal fun PlayerControlsShell(
             onScrubFinished = onScrubFinished,
             onSubtitleClick = onSubtitleClick,
             onAudioClick = onAudioClick,
+            onQuickSettingsClick = onQuickSettingsClick,
             onSourcesClick = onSourcesClick,
             onEpisodesClick = onEpisodesClick,
             onChaptersClick = onChaptersClick,
@@ -316,6 +319,7 @@ internal fun PlayerControlsShell(
                     onSpeedClick = onSpeedClick,
                     onSubtitleClick = onSubtitleClick,
                     onAudioClick = onAudioClick,
+                    onQuickSettingsClick = onQuickSettingsClick,
                     onSourcesClick = onSourcesClick,
                     onEpisodesClick = onEpisodesClick,
                     chapters = chapters,
@@ -367,6 +371,7 @@ internal fun PlayerControlsShell(
                         resizeMode = resizeMode,
                         onSubtitleClick = onSubtitleClick,
                         onAudioClick = onAudioClick,
+                        onQuickSettingsClick = onQuickSettingsClick,
                         onSourcesClick = onSourcesClick,
                         onEpisodesClick = onEpisodesClick,
                         onChaptersClick = onChaptersClick,
@@ -691,6 +696,7 @@ private fun ProgressControls(
     onSpeedClick: () -> Unit,
     onSubtitleClick: () -> Unit,
     onAudioClick: () -> Unit,
+    onQuickSettingsClick: (() -> Unit)? = null,
     onSourcesClick: (() -> Unit)? = null,
     onEpisodesClick: (() -> Unit)? = null,
     chapters: List<PlayerChapter> = emptyList(),
@@ -755,6 +761,13 @@ private fun ProgressControls(
                         painter = audioPainter,
                         onClick = onAudioClick,
                     )
+                    if (onQuickSettingsClick != null) {
+                        PlayerActionPillButton(
+                            label = stringResource(Res.string.player_quick_settings),
+                            icon = Icons.Rounded.Settings,
+                            onClick = onQuickSettingsClick,
+                        )
+                    }
                     if (onChaptersClick != null) {
                         PlayerActionPillButton(
                             label = stringResource(Res.string.compose_player_chapters),

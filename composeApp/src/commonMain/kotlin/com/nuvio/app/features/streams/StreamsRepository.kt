@@ -2,6 +2,7 @@ package com.nuvio.app.features.streams
 
 import co.touchlab.kermit.Logger
 import com.nuvio.app.core.build.AppFeaturePolicy
+import com.nuvio.app.core.network.NetworkSpeedRepository
 import com.nuvio.app.features.addons.AddonRepository
 import com.nuvio.app.features.addons.buildAddonResourceUrl
 import com.nuvio.app.features.addons.enabledAddons
@@ -11,6 +12,7 @@ import com.nuvio.app.features.debrid.DebridSettingsRepository
 import com.nuvio.app.features.debrid.DebridStreamPresentation
 import com.nuvio.app.features.debrid.LocalDebridAvailabilityService
 import com.nuvio.app.features.details.MetaDetailsRepository
+import com.nuvio.app.features.details.parseRuntimeMinutes
 import com.nuvio.app.features.player.PlayerSettingsRepository
 import com.nuvio.app.features.plugins.PluginRepository
 import com.nuvio.app.features.plugins.pluginContentId
@@ -104,10 +106,20 @@ object StreamsRepository {
         _uiState.value = StreamsUiState(requestToken = requestToken)
 
         PlayerSettingsRepository.ensureLoaded()
+        IgnoredStreamsRepository.ensureLoaded()
         val playerSettings = PlayerSettingsRepository.uiState.value
+        val expectedRuntimeMinutes = if (type.equals("movie", ignoreCase = true)) {
+            MetaDetailsRepository.peek(type, parentMetaId ?: videoId)?.runtime
+                ?.let(::parseRuntimeMinutes)
+        } else {
+            null
+        }
         val debridSettings = DebridSettingsRepository.snapshot()
         val streamBadgeRules = StreamBadgeSettingsRepository.snapshot()
         val autoPlayMode = playerSettings.streamAutoPlayMode
+        if (autoPlayMode == StreamAutoPlayMode.SMART_PLAY && !manualSelection) {
+            NetworkSpeedRepository.refreshIfStale()
+        }
         val isAutoPlayEnabled = !manualSelection && autoPlayMode != StreamAutoPlayMode.MANUAL &&
             !(autoPlayMode == StreamAutoPlayMode.REGEX_MATCH &&
                 !StreamAutoPlayPolicy.isRegexSelectionConfigured(playerSettings.streamAutoPlayRegex))
@@ -143,6 +155,7 @@ object StreamsRepository {
         }
 
         val embeddedStreams = MetaDetailsRepository.findEmbeddedStreams(videoId)
+            .filterNot { IgnoredStreamsRepository.isIgnored(it, videoId) }
         if (embeddedStreams.isNotEmpty()) {
             log.d { "Using ${embeddedStreams.size} embedded streams for type=$type id=$videoId" }
             val group = AddonStreamGroup(
@@ -257,9 +270,23 @@ object StreamsRepository {
             val debridAvailabilityJobs = mutableListOf<Job>()
             var autoSelectTriggered = false
             var timeoutElapsed = false
+            fun autoPlayStreams(): List<StreamItem> {
+                val all = _uiState.value.groups.flatMap { it.streams }
+                val matching = all.filterNot {
+                    it.mismatchesRequestedContent(type, season, episode, expectedRuntimeMinutes)
+                }
+                if (matching.size != all.size) {
+                    log.d {
+                        "Skipping ${all.size - matching.size} content-mismatched streams " +
+                            "for type=$type S${season}E${episode} runtime=${expectedRuntimeMinutes}m"
+                    }
+                }
+                return matching
+            }
+
             fun evaluateAutoPlay(bingeGroupOnly: Boolean = false): StreamAutoPlayEvaluation =
                 StreamAutoPlaySelector.evaluateAutoPlayStream(
-                    streams = _uiState.value.groups.flatMap { it.streams },
+                    streams = autoPlayStreams(),
                     mode = autoPlayMode,
                     regexPattern = playerSettings.streamAutoPlayRegex,
                     source = playerSettings.streamAutoPlaySource,
@@ -271,11 +298,26 @@ object StreamsRepository {
                     bingeGroupOnly = bingeGroupOnly,
                     debridEnabled = debridSettings.canResolvePlayableLinks,
                     activeResolverProviderId = debridSettings.activeResolverProviderId,
+                    smartPlayContext = if (autoPlayMode == StreamAutoPlayMode.SMART_PLAY && !manualSelection) {
+                        currentSmartPlayContext(playerSettings.smartPlayHdrPreference)
+                    } else {
+                        null
+                    },
                 )
 
             fun settleAutoPlay(evaluation: StreamAutoPlayEvaluation) {
                 if (autoSelectTriggered) return
                 autoSelectTriggered = true
+                if (autoPlayMode == StreamAutoPlayMode.SMART_PLAY) {
+                    val context = currentSmartPlayContext(playerSettings.smartPlayHdrPreference)
+                    log.d {
+                        "Smart Play target=${SmartPlayPolicy.targetHeight(context)} " +
+                            "displayPx=${context.displayMaxHeightPx} mbps=${context.downloadMbps} " +
+                            "selected=${evaluation.stream?.streamLabel} " +
+                            "addon=${evaluation.stream?.addonName} " +
+                            "height=${evaluation.stream?.streamQuality()?.height}"
+                    }
+                }
                 _uiState.update { current ->
                     if (evaluation.stream == null) {
                         current.copy(
@@ -298,7 +340,7 @@ object StreamsRepository {
 
                 // Try binge group + filename first (most precise), then infoHash
                 if (persistedBingeGroup != null && !timeoutElapsed) {
-                    val allStreams = _uiState.value.groups.flatMap { it.streams }
+                    val allStreams = autoPlayStreams()
                     // Filename match
                     if (persistedFilename != null) {
                         val nextFilename = run {
@@ -358,10 +400,13 @@ object StreamsRepository {
             }
 
             fun presentStreamGroup(group: AddonStreamGroup): AddonStreamGroup {
+                val visibleGroup = group.copy(
+                    streams = group.streams.filterNot { IgnoredStreamsRepository.isIgnored(it, videoId) },
+                )
                 val badgeGroup = StreamBadgePresentation.apply(
-                    groups = listOf(group),
+                    groups = listOf(visibleGroup),
                     rules = streamBadgeRules,
-                ).firstOrNull() ?: group
+                ).firstOrNull() ?: visibleGroup
                 return DebridStreamPresentation.apply(
                     groups = listOf(badgeGroup),
                     settings = debridSettings,
@@ -447,7 +492,7 @@ object StreamsRepository {
                         delay(timeoutSeconds * 1_000L)
                         timeoutElapsed = true
                         if (!autoSelectTriggered) {
-                            val allStreams = _uiState.value.groups.flatMap { it.streams }
+                            val allStreams = autoPlayStreams()
                             if (allStreams.isNotEmpty()) {
                                 val evaluation = evaluateAutoPlay()
                                 if (evaluation.stream != null || !evaluation.hasPendingDebridCandidate) {
@@ -647,6 +692,19 @@ object StreamsRepository {
 
     fun selectFilter(addonId: String?) {
         _uiState.update { it.copy(selectedFilter = addonId) }
+    }
+
+    fun filterIgnored(videoId: String) {
+        IgnoredStreamsRepository.ensureLoaded()
+        _uiState.update { current ->
+            current.copy(
+                groups = current.groups.map { group ->
+                    group.copy(
+                        streams = group.streams.filterNot { IgnoredStreamsRepository.isIgnored(it, videoId) },
+                    )
+                },
+            )
+        }
     }
 
     fun consumeAutoPlay() {

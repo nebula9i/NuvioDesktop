@@ -16,6 +16,7 @@ import com.nuvio.app.features.p2p.P2pSettingsUiState
 import com.nuvio.app.features.p2p.P2pStreamingState
 import com.nuvio.app.features.player.skip.NextEpisodeInfo
 import com.nuvio.app.features.player.skip.SkipInterval
+import com.nuvio.app.features.streams.StreamItem
 import com.nuvio.app.features.streams.StreamsUiState
 import com.nuvio.app.features.tracking.TrackingMediaReference
 import com.nuvio.app.features.watched.WatchedUiState
@@ -210,6 +211,16 @@ internal class PlayerScreenRuntime(
     var seekProgressSyncJob by mutableStateOf<Job?>(null)
     var accumulatedSeekState by mutableStateOf<PlayerAccumulatedSeekState?>(null)
     var initialLoadCompleted by mutableStateOf(false)
+    var isSourceSwitchInProgress by mutableStateOf(false)
+    var qualitySwitchGeneration = 0L
+    var lastStablePositionMs by mutableStateOf(initialPositionMs.coerceAtLeast(0L))
+    var pendingQualityCandidates by mutableStateOf<List<StreamItem>>(emptyList())
+    var pendingQualityPositionMs by mutableStateOf(initialPositionMs.coerceAtLeast(0L))
+    var pendingQualityPreviousStream by mutableStateOf<StreamItem?>(null)
+    val stallDetector = PlayerStallDetector()
+    var showStallDowngradeOffer by mutableStateOf(false)
+    var stallDowngradeTargetHeight by mutableStateOf<Int?>(null)
+    var stallDowngradeInProgress by mutableStateOf(false)
     var speedBoostRestoreSpeed by mutableStateOf<Float?>(null)
     var isHoldToSpeedGestureActive by mutableStateOf(false)
     var initialSeekApplied by mutableStateOf(
@@ -278,6 +289,9 @@ internal class PlayerScreenRuntime(
     var showAudioModal by mutableStateOf(false)
     var showSubtitleModal by mutableStateOf(false)
     var showVideoSettingsModal by mutableStateOf(false)
+    var showQuickSettingsPanel by mutableStateOf(false)
+    var showIgnoredFilesPanel by mutableStateOf(false)
+    var quickSettingsQualityOverride by mutableStateOf<Int?>(null)
     var showStreamInfo by mutableStateOf(false)
     var showPartyPanel by mutableStateOf(false)
     var partyPanelToken by mutableStateOf(0L)
@@ -287,8 +301,9 @@ internal class PlayerScreenRuntime(
     var showPartyChat by mutableStateOf(false)
     var partyChatVisible by mutableStateOf(false)
     val isPanelOpen: Boolean
-        get() = showAudioModal || showSubtitleModal || showVideoSettingsModal || showStreamInfo ||
-            showPartyPanel || showSourcesPanel || showEpisodesPanel || showSubmitIntroModal
+        get() = showAudioModal || showSubtitleModal || showVideoSettingsModal || showQuickSettingsPanel ||
+            showIgnoredFilesPanel || showStreamInfo || showPartyPanel || showSourcesPanel ||
+            showEpisodesPanel || showSubmitIntroModal
     var partyBehind by mutableStateOf(false)
     var partyBehindMs by mutableStateOf<Long?>(null)
     var partyRateNudge: Float? = null

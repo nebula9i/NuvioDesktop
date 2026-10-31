@@ -219,8 +219,12 @@ internal fun PlayerScreenRuntime.switchToP2pSourceStream(stream: StreamItem) {
         return
     }
     val currentPositionMs = playbackSnapshot.positionMs.coerceAtLeast(0L)
+        .takeIf { it > 0L }
+        ?: lastStablePositionMs.coerceAtLeast(0L)
     flushWatchProgress()
     stopActiveP2pStream()
+    isSourceSwitchInProgress = true
+    lastStablePositionMs = currentPositionMs
     saveP2pStreamForReuse(
         stream = stream,
         videoId = activeVideoId,
@@ -251,6 +255,7 @@ internal fun PlayerScreenRuntime.switchToP2pSourceStream(stream: StreamItem) {
     activeInitialProgressFraction = null
     showSourcesPanel = false
     controlsVisible = true
+    resetStallDetection()
     PlayerStreamsRepository.pauseSearchForPlayback()
 }
 
@@ -260,6 +265,7 @@ internal fun PlayerScreenRuntime.switchToP2pEpisodeStream(
     isAutoPlay: Boolean = false,
 ) {
     val infoHash = stream.p2pInfoHash ?: return
+    clearQualitySwitchState()
     if (!P2pSettingsRepository.isVisible) return
     if (!P2pSettingsRepository.uiState.value.p2pEnabled) {
         pendingP2pSwitch = PendingPlayerP2pSwitch(stream = stream, episode = episode, isAutoPlay = isAutoPlay)
@@ -328,8 +334,12 @@ internal fun PlayerScreenRuntime.switchToSource(
         return
     }
     val currentPositionMs = playbackSnapshot.positionMs.coerceAtLeast(0L)
+        .takeIf { it > 0L }
+        ?: lastStablePositionMs.coerceAtLeast(0L)
     flushWatchProgress()
     stopActiveP2pStream()
+    isSourceSwitchInProgress = true
+    lastStablePositionMs = currentPositionMs
     val currentVideoId = activeVideoId
     if (saveForReuse && playerSettingsUiState.streamReuseLastLinkEnabled && currentVideoId != null) {
         saveDirectStreamForReuse(stream, url, currentVideoId, activeSeasonNumber, activeEpisodeNumber)
@@ -355,6 +365,7 @@ internal fun PlayerScreenRuntime.switchToSource(
     activeInitialProgressFraction = null
     showSourcesPanel = false
     controlsVisible = true
+    resetStallDetection()
     PlayerStreamsRepository.pauseSearchForPlayback()
 }
 
@@ -364,6 +375,7 @@ internal fun PlayerScreenRuntime.switchToEpisodeStream(
     serverResumeMs: Long? = null,
     saveForReuse: Boolean = true,
 ) {
+    clearQualitySwitchState()
     if (prepareServerForPlayer(stream) { switchToEpisodeStream(it, episode, serverResumeMs = newerServerResumeMs(it, episode)) }) return
     if (
         resolveYouTubeForPlayer(stream) { resolved ->
@@ -408,10 +420,12 @@ internal fun PlayerScreenRuntime.switchToEpisodeStream(
     activeSourceResponseHeaders = sanitizePlaybackResponseHeaders(stream.behaviorHints.proxyHeaders?.response)
     activeStreamType = stream.streamType
     applyEpisodeStreamMetadata(stream, episode, resume)
+    resetStallDetection()
 }
 
 internal fun PlayerScreenRuntime.switchToDownloadedEpisode(downloadItem: DownloadItem, episode: MetaVideo) {
     val localFileUri = DownloadsRepository.playableLocalFileUri(downloadItem) ?: return
+    clearQualitySwitchState()
     resetEpisodePanelAndNextEpisodeState()
     flushWatchProgress()
     stopActiveP2pStream()
@@ -435,6 +449,7 @@ internal fun PlayerScreenRuntime.switchToDownloadedEpisode(downloadItem: Downloa
         ?.let { (it / 100f).coerceIn(0f, 1f) }
     val epResumePositionMs = epEntry?.lastPositionMs?.takeIf { it > 0L } ?: 0L
 
+    resetStallDetection()
     externalSubtitles = DownloadSubtitles.localSubtitles(localFileUri)
     activeSourceUrl = localFileUri
     activeSourceAudioUrl = null

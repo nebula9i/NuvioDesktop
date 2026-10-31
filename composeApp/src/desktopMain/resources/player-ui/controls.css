@@ -3769,3 +3769,70 @@ svg {
   align-items: center;
   gap: 6px;
 }
+
+.quick-settings-panel {
+  max-height: min(78vh, 720px);
+}
+
+.quick-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 4px 0 14px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.quick-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quick-settings-title {
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--theme-text-muted);
+}
+
+.quick-settings-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.quick-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quick-settings-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.quick-settings-row-title {
+  font-size: 14px;
+  color: var(--theme-text-primary);
+}
+
+.quick-settings-row-subtitle {
+  font-size: 12px;
+  color: var(--theme-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quick-settings-note {
+  font-size: 12px;
+  color: var(--theme-text-secondary);
+}
