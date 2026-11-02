@@ -6,6 +6,7 @@ data class StreamQuality(
     val isHdr: Boolean,
     val isDolbyVision: Boolean,
     val sizeBytes: Long?,
+    val runtimeMinutes: Int?,
 )
 
 internal fun StreamItem.streamQuality(): StreamQuality {
@@ -31,8 +32,51 @@ internal fun StreamItem.streamQuality(): StreamQuality {
         isDolbyVision = isDolbyVision,
         sizeBytes = behaviorHints.videoSize
             ?: raw?.size
-            ?: debridCacheStatus?.cachedSize,
+            ?: debridCacheStatus?.cachedSize
+            ?: parseSizeBytes(text),
+        runtimeMinutes = parsed?.duration?.toRuntimeMinutes()
+            ?: parseRuntimeMinutes(text),
     )
+}
+
+private fun Long.toRuntimeMinutes(): Int? = when {
+    this <= 0 -> null
+    this >= 600 -> (this / 60).toInt().takeIf { it > 0 }
+    else -> toInt()
+}
+
+private fun parseRuntimeMinutes(text: String): Int? {
+    RUNTIME_HOURS_REGEX.find(text)?.let { match ->
+        val hours = match.groupValues.getOrNull(1)?.toIntOrNull() ?: 0
+        val minutes = match.groupValues.getOrNull(2)?.toIntOrNull() ?: 0
+        val total = (hours * 60) + minutes
+        if (total > 0) return total
+    }
+    RUNTIME_CLOCK_REGEX.find(text)?.let { match ->
+        val first = match.groupValues.getOrNull(1)?.toIntOrNull() ?: return@let
+        val second = match.groupValues.getOrNull(2)?.toIntOrNull() ?: return@let
+        val total = if (match.groupValues.getOrNull(3).isNullOrEmpty()) {
+            first
+        } else {
+            (first * 60) + second
+        }
+        if (total > 0) return total
+    }
+    RUNTIME_MINUTES_REGEX.find(text)?.let { match ->
+        match.groupValues.getOrNull(1)?.toIntOrNull()?.takeIf { it > 0 }?.let { return it }
+    }
+    return null
+}
+
+private fun parseSizeBytes(text: String): Long? {
+    val match = SIZE_REGEX.find(text) ?: return null
+    val value = match.groupValues.getOrNull(1)?.toDoubleOrNull() ?: return null
+    val multiplier = when (match.groupValues.getOrNull(2)?.lowercase()) {
+        "tib", "tb" -> 1024.0 * 1024.0 * 1024.0 * 1024.0
+        "gib", "gb" -> 1024.0 * 1024.0 * 1024.0
+        else -> 1024.0 * 1024.0
+    }
+    return (value * multiplier).toLong()
 }
 
 private fun StreamItem.qualityTexts(): List<String> = listOfNotNull(
@@ -67,6 +111,16 @@ internal fun String.toHeight(): Int? {
     }
 }
 
+private val RUNTIME_HOURS_REGEX = Regex(
+    """\b(\d{1,2})\s*h(?:ours?)?(?:\s*:?\s*(\d{1,2})\s*m(?:in)?)?\b""",
+    RegexOption.IGNORE_CASE,
+)
+private val RUNTIME_MINUTES_REGEX = Regex("""\b(\d{1,3})\s*min(?:ute)?s?\b""", RegexOption.IGNORE_CASE)
+private val RUNTIME_CLOCK_REGEX = Regex("""\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b""")
+private val SIZE_REGEX = Regex(
+    """\b(\d+(?:\.\d+)?)\s*(TiB|TB|GiB|GB|MiB|MB)\b""",
+    RegexOption.IGNORE_CASE,
+)
 private val CAM_REGEX = Regex(
     """\b(cam|hdcam|camrip|hdts|ts|telesync|tc|telecine|scr|screener)\b""",
     RegexOption.IGNORE_CASE,

@@ -63,6 +63,18 @@ class StreamQualityTest {
         assertEquals(8_000_000_000L, resolved.streamQuality().sizeBytes)
     }
 
+    @Test
+    fun `runtime and size are parsed from addon text`() {
+        val colonRuntime = stream(name = "Movie.2024.1080p.1h:51m:18s.11.9 GB")
+        val hoursRuntime = stream(name = "Movie.2024.1080p.1h 51m")
+        val minutesRuntime = stream(name = "Movie.2024.1080p.111 min")
+
+        assertEquals(111, colonRuntime.streamQuality().runtimeMinutes)
+        assertEquals(111, hoursRuntime.streamQuality().runtimeMinutes)
+        assertEquals(111, minutesRuntime.streamQuality().runtimeMinutes)
+        assertEquals((11.9 * 1024 * 1024 * 1024).toLong(), colonRuntime.streamQuality().sizeBytes)
+    }
+
     private fun stream(
         name: String?,
         parsedResolution: String? = null,

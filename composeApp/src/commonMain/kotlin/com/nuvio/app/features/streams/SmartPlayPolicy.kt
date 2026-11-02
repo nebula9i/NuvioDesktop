@@ -44,9 +44,10 @@ internal object SmartPlayPolicy {
 
     /**
      * Keeps the source order already presented in the stream list and only filters by the
-     * display/bandwidth target. Direct and debrid streams stay ahead of raw P2P streams.
-     * Within one source, the highest fitting resolution wins; the remaining fitting streams
-     * come next, then the smallest streams above the target as a last resort.
+     * display/bandwidth target plus each source's estimated bitrate. Direct and debrid streams
+     * stay ahead of raw P2P streams. Within one source, the highest fitting resolution wins,
+     * then the lighter file at the same resolution; the remaining fitting streams come next,
+     * then the smallest streams above the target as a last resort.
      */
     fun rankSmart(
         streams: List<StreamItem>,
@@ -63,9 +64,11 @@ internal object SmartPlayPolicy {
             if (stream.addonId !in sourceOrder) {
                 sourceOrder[stream.addonId] = index
             }
+            val quality = stream.streamQuality()
             RankedStream(
                 stream = stream,
-                quality = stream.streamQuality(),
+                quality = quality,
+                requiredMbps = requiredMbps(quality),
                 readiness = readiness(stream, debridEnabled),
                 sourceOrder = sourceOrder.getValue(stream.addonId),
                 originalIndex = index,
@@ -80,15 +83,31 @@ internal object SmartPlayPolicy {
             .values
             .sortedWith(compareBy({ it.first().readiness }, { it.first().sourceOrder }))
 
+        val bandwidthLimit = context.downloadMbps?.takeIf { it > 0.0 }?.times(0.9) ?: 0.0
         val fitting = mutableListOf<StreamItem>()
-        val fallback = mutableListOf<StreamItem>()
+        val heightFitting = mutableListOf<RankedStream>()
+        val heavyFallback = mutableListOf<StreamItem>()
+        val overTargetFallback = mutableListOf<StreamItem>()
         groups.forEach { group ->
-            val (fits, overTarget) = group.partition { it.fits(target) }
-            fits.sortedWith(fitsComparator(preferredGroup, context.hdrPreference)).forEach { fitting += it.stream }
+            val (fitsHeight, overTarget) = group.partition { it.fitsHeight(target) }
+            val (fitsBandwidth, heavy) = fitsHeight.partition { it.fitsBandwidth(bandwidthLimit) }
+            heightFitting += fitsHeight
+            fitsBandwidth.sortedWith(fitsComparator(preferredGroup, context.hdrPreference))
+                .forEach { fitting += it.stream }
+            heavy.sortedWith(overTargetComparator(preferredGroup, context.hdrPreference))
+                .forEach { heavyFallback += it.stream }
             overTarget.sortedWith(overTargetComparator(preferredGroup, context.hdrPreference))
-                .forEach { fallback += it.stream }
+                .forEach { overTargetFallback += it.stream }
         }
-        return fitting + fallback
+        if (fitting.isNotEmpty()) {
+            return fitting + heavyFallback + overTargetFallback
+        }
+        if (heightFitting.isNotEmpty()) {
+            return heightFitting
+                .sortedWith(lightestComparator(preferredGroup, context.hdrPreference))
+                .map { it.stream } + overTargetFallback
+        }
+        return overTargetFallback
     }
 
     private fun readiness(stream: StreamItem, debridEnabled: Boolean): Int = when {
@@ -101,10 +120,13 @@ internal object SmartPlayPolicy {
         else -> OTHER
     }
 
-    private fun RankedStream.fits(target: Int): Boolean {
+    private fun RankedStream.fitsHeight(target: Int): Boolean {
         val height = quality.height
         return height == null || target <= 0 || height <= target
     }
+
+    private fun RankedStream.fitsBandwidth(limit: Double): Boolean =
+        limit <= 0.0 || requiredMbps == null || requiredMbps <= limit
 
     private fun fitsComparator(
         preferredGroup: String,
@@ -113,6 +135,7 @@ internal object SmartPlayPolicy {
         compareByDescending<RankedStream> { it.quality.height ?: -1 }
             .thenByDescending { it.hdrScore(hdrPreference) }
             .thenByDescending { it.bingeMatch(preferredGroup) }
+            .thenBy { it.requiredMbps ?: Double.MAX_VALUE }
             .thenBy { it.originalIndex }
 
     private fun overTargetComparator(
@@ -122,7 +145,25 @@ internal object SmartPlayPolicy {
         compareBy<RankedStream> { it.quality.height ?: Int.MAX_VALUE }
             .thenByDescending { it.hdrScore(hdrPreference) }
             .thenByDescending { it.bingeMatch(preferredGroup) }
+            .thenBy { it.requiredMbps ?: Double.MAX_VALUE }
             .thenBy { it.originalIndex }
+
+    private fun lightestComparator(
+        preferredGroup: String,
+        hdrPreference: SmartPlayHdrPreference,
+    ): Comparator<RankedStream> =
+        compareBy<RankedStream> { it.requiredMbps ?: Double.MAX_VALUE }
+            .thenByDescending { it.quality.height ?: -1 }
+            .thenByDescending { it.hdrScore(hdrPreference) }
+            .thenByDescending { it.bingeMatch(preferredGroup) }
+            .thenBy { it.originalIndex }
+
+    private fun requiredMbps(quality: StreamQuality): Double? {
+        val sizeBytes = quality.sizeBytes ?: return null
+        val runtimeMinutes = quality.runtimeMinutes ?: return null
+        if (sizeBytes <= 0L || runtimeMinutes <= 0) return null
+        return sizeBytes * 8.0 / (runtimeMinutes * 60.0) / 1_000_000.0
+    }
 
     private fun RankedStream.bingeMatch(preferredGroup: String): Boolean =
         preferredGroup.isNotEmpty() && stream.behaviorHints.bingeGroup == preferredGroup
@@ -136,6 +177,7 @@ internal object SmartPlayPolicy {
     private data class RankedStream(
         val stream: StreamItem,
         val quality: StreamQuality,
+        val requiredMbps: Double?,
         val readiness: Int,
         val sourceOrder: Int,
         val originalIndex: Int,

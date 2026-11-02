@@ -218,6 +218,56 @@ class SmartPlayPolicyTest {
     }
 
     @Test
+    fun `a lighter file wins when the heavier one exceeds the measured bandwidth`() {
+        val heavy = stream(
+            "1080p Heavy",
+            "https://example.com/heavy.mp4",
+            1080,
+            sizeBytes = 20_000_000_000L,
+            durationSeconds = 100 * 60L,
+        )
+        val light = stream(
+            "1080p Light",
+            "https://example.com/light.mp4",
+            1080,
+            sizeBytes = 5_000_000_000L,
+            durationSeconds = 100 * 60L,
+        )
+
+        val ranked = SmartPlayPolicy.rankSmart(
+            streams = listOf(heavy, light),
+            context = SmartPlayContext(displayMaxHeightPx = 1080, downloadMbps = 20.0),
+        )
+
+        assertEquals(listOf(light, heavy), ranked)
+    }
+
+    @Test
+    fun `a lighter 4K source can beat a heavier 4K remux`() {
+        val heavy = stream(
+            "4K Remux",
+            "https://example.com/remux.mp4",
+            2160,
+            sizeBytes = 50_000_000_000L,
+            durationSeconds = 100 * 60L,
+        )
+        val light = stream(
+            "4K Light",
+            "https://example.com/light-4k.mp4",
+            2160,
+            sizeBytes = 10_000_000_000L,
+            durationSeconds = 100 * 60L,
+        )
+
+        val ranked = SmartPlayPolicy.rankSmart(
+            streams = listOf(heavy, light),
+            context = SmartPlayContext(displayMaxHeightPx = 2160, downloadMbps = 35.0),
+        )
+
+        assertEquals(listOf(light, heavy), ranked)
+    }
+
+    @Test
     fun `downloadMbps computes sustained throughput`() {
         assertTrue(downloadMbps(1_000_000, 1_000)!!.let { it > 7.9 && it < 8.1 })
         assertEquals(null, downloadMbps(0, 1_000))
@@ -232,21 +282,29 @@ class SmartPlayPolicyTest {
         addonName: String = "Addon",
         infoHash: String? = null,
         debridResolve: Boolean = true,
+        sizeBytes: Long? = null,
+        durationSeconds: Long? = null,
     ): StreamItem = StreamItem(
         name = name,
         url = url,
         infoHash = infoHash,
         addonName = addonName,
         addonId = "addon:$addonName",
-        behaviorHints = StreamBehaviorHints(bingeGroup = bingeGroup),
-        clientResolve = if (debridResolve && height != null) {
+        behaviorHints = StreamBehaviorHints(
+            bingeGroup = bingeGroup,
+            videoSize = sizeBytes,
+        ),
+        clientResolve = if (debridResolve && (height != null || durationSeconds != null)) {
             StreamClientResolve(
                 type = "debrid",
                 service = "torbox",
                 isCached = true,
                 stream = StreamClientResolveStream(
                     raw = StreamClientResolveRaw(
-                        parsed = StreamClientResolveParsed(resolution = "${height}p"),
+                        parsed = StreamClientResolveParsed(
+                            resolution = height?.let { "${it}p" },
+                            duration = durationSeconds,
+                        ),
                     ),
                 ),
             )
