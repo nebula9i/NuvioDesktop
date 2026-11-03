@@ -54,8 +54,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.PointerEventType
-import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -66,6 +64,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
+import com.nuvio.app.core.ui.dismissOnPointerScroll
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.nuvio.app.core.build.AppFeaturePolicy
@@ -326,7 +325,7 @@ internal fun HomePosterHoverPreview(
                         trailerPlaybackSource = trailerPlaybackSource,
                         modifier = Modifier
                             .hoverable(previewInteractionSource)
-                            .onPointerEvent(PointerEventType.Scroll) {
+                            .dismissOnPointerScroll {
                                 previewDismissedByScroll = true
                                 previewVisible = false
                                 popupMounted = false
