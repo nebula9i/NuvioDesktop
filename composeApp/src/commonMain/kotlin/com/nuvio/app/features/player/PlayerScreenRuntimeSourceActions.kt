@@ -481,7 +481,11 @@ internal fun PlayerScreenRuntime.switchToDownloadedEpisode(downloadItem: Downloa
 }
 
 internal fun PlayerScreenRuntime.playNextEpisode(automatic: Boolean = false) {
-    if (nextEpisodeAutoPlaySearching || nextEpisodeAutoPlayCountdown != null) return
+    if (automatic) {
+        if (nextEpisodeAutoPlaySearching || nextEpisodeAutoPlayCountdown != null) return
+    } else {
+        cancelNextEpisodeAutoPlay()
+    }
     nextEpisodePreloadTriggered = false
     val playbackKey = activePlaybackKey
     val nextVideoId = nextEpisodeInfo?.takeIf { it.hasAired }?.videoId ?: return

@@ -849,7 +849,7 @@ private fun PlayerScreenRuntime.RenderPlayerControls(
             releaseInfo = metaUiState.meta?.takeIf { it.id == parentMetaId }?.releaseInfo,
             badges = playerBadges,
             hideDetails = activeSkipInterval != null && !skipIntervalDismissed,
-            onNextEpisodeClick = if (nextEpisodeInfo?.hasAired == true && !nextEpisodeAutoPlaySearching && nextEpisodeAutoPlayCountdown == null) {
+            onNextEpisodeClick = if (nextEpisodeInfo?.hasAired == true) {
                 {
                     if (!partyBlocksControl()) playNextEpisode()
                 }
@@ -1441,7 +1441,15 @@ private fun PlayerScreenRuntime.prepareEpisodesForPlayerControls() {
     }
 }
 
-private fun PlayerScreenRuntime.requestEpisodeStreamsForPlayerControls(
+internal fun PlayerScreenRuntime.requestEpisodeStreamsForPlayerControls(
+    episode: MetaVideo,
+    forceRefresh: Boolean = false,
+) {
+    if (playEpisodeWithSmartPlay(episode, forceRefresh)) return
+    showEpisodeStreamsForPlayerControls(episode, forceRefresh)
+}
+
+internal fun PlayerScreenRuntime.showEpisodeStreamsForPlayerControls(
     episode: MetaVideo,
     forceRefresh: Boolean = false,
 ) {
@@ -2162,13 +2170,7 @@ private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMs: Long) {
             )
         },
         onEpisodeStreamsRequested = { episode ->
-            PlayerStreamsRepository.loadEpisodeStreams(
-                type = contentType ?: parentMetaType,
-                videoId = episode.id,
-                season = episode.season,
-                episode = episode.episode,
-            )
-            episodeStreamsPanelState = EpisodeStreamsPanelState(showStreams = true, selectedEpisode = episode)
+            requestEpisodeStreamsForPlayerControls(episode)
         },
         onEpisodeStreamFilterSelected = PlayerStreamsRepository::selectEpisodeStreamsFilter,
         onEpisodeStreamSelected = { stream, episode -> switchToEpisodeStream(stream, episode) },

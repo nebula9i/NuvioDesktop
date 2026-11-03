@@ -25,6 +25,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -325,6 +326,83 @@ internal fun CoroutineScope.launchPlayerNextEpisodeAutoPlay(
             onNextEpisodeCardVisibleChanged(false)
         }
     }
+}
+
+internal fun PlayerScreenRuntime.playEpisodeWithSmartPlay(
+    episode: MetaVideo,
+    forceRefresh: Boolean = false,
+): Boolean {
+    val settings = playerSettingsUiState
+    if (settings.streamAutoPlayMode != StreamAutoPlayMode.SMART_PLAY) return false
+    showEpisodesPanel = false
+    showSourcesPanel = false
+    episodeStreamsPanelState = EpisodeStreamsPanelState()
+    PlayerStreamsRepository.loadEpisodeStreams(
+        type = contentType ?: parentMetaType,
+        videoId = episode.id,
+        season = episode.season,
+        episode = episode.episode,
+        forceRefresh = forceRefresh,
+    )
+    scope.launch {
+        val state = withTimeoutOrNull(NEXT_EPISODE_HARD_TIMEOUT_MS) {
+            PlayerStreamsRepository.episodeStreamsState.first { current ->
+                !current.isAnyLoading && (current.groups.isNotEmpty() || current.emptyStateReason != null)
+            }
+        }
+        if (state == null) {
+            showEpisodeStreamsForPlayerControls(episode)
+            return@launch
+        }
+
+        val type = contentType ?: parentMetaType
+        val streams = state.groups
+            .flatMap { group -> group.streams }
+            .filterNot { stream ->
+                stream.mismatchesRequestedContent(
+                    contentType = type,
+                    season = episode.season,
+                    episode = episode.episode,
+                    expectedRuntimeMinutes = null,
+                )
+            }
+            .filterNot { stream -> IgnoredStreamsRepository.isIgnored(stream, episode.id) }
+        val debridSettings = DebridSettingsRepository.snapshot()
+        val selected = StreamAutoPlaySelector.selectAutoPlayStream(
+            streams = streams,
+            mode = StreamAutoPlayMode.SMART_PLAY,
+            regexPattern = settings.streamAutoPlayRegex,
+            source = settings.streamAutoPlaySource,
+            installedAddonNames = AddonRepository.uiState.value.addons
+                .enabledAddons()
+                .map { addon -> addon.displayTitle }
+                .toSet(),
+            selectedAddons = settings.streamAutoPlaySelectedAddons,
+            selectedPlugins = settings.streamAutoPlaySelectedPlugins,
+            preferredBingeGroup = null,
+            preferBingeGroupInSelection = false,
+            bingeGroupOnly = false,
+            debridEnabled = debridSettings.canResolvePlayableLinks,
+            activeResolverProviderId = debridSettings.activeResolverProviderId,
+            smartPlayContext = currentSmartPlayContext(settings.smartPlayHdrPreference),
+        )
+        if (selected == null) {
+            showEpisodeStreamsForPlayerControls(episode)
+            return@launch
+        }
+        when (val resolved = DirectDebridPlaybackResolver.resolveToPlayableStream(
+            selected,
+            episode.season,
+            episode.episode,
+        )) {
+            is DirectDebridPlayableResult.Success -> switchToEpisodeStream(resolved.stream, episode)
+            else -> {
+                resolved.toastMessage()?.let { message -> NuvioToastController.show(message) }
+                showEpisodeStreamsForPlayerControls(episode)
+            }
+        }
+    }
+    return true
 }
 
 internal fun PlayerScreenRuntime.preloadNextEpisodeSources() {
