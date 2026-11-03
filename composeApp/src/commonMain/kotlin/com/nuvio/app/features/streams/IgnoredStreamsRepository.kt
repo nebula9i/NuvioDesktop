@@ -99,7 +99,13 @@ object IgnoredStreamsRepository {
 
         val url = playableDirectUrl ?: url ?: externalUrl
         if (!url.isNullOrBlank()) {
-            return "url:${url.substringBefore('?').trim().lowercase()}"
+            val identity = listOfNotNull(
+                behaviorHints.filename?.takeIf { it.isNotBlank() },
+                name?.takeIf { it.isNotBlank() },
+                title?.takeIf { it.isNotBlank() },
+                description?.takeIf { it.isNotBlank() },
+            ).joinToString("|").lowercase()
+            return "url:${url.trim().lowercase()}:$identity"
         }
         return "name:${addonId}:${name.orEmpty()}"
     }

@@ -117,6 +117,8 @@ internal fun PlayerScreenRuntime.ignoreActiveFile(): Boolean {
 
     PlayerStreamsRepository.filterIgnored(videoId)
     StreamsRepository.filterIgnored(videoId)
+    // Advance to the next eligible source instead of leaving the rejected file playing.
+    selectQuality(null)
     showQuickSettingsPanel = false
     return true
 }

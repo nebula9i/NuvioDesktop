@@ -2644,4 +2644,16 @@
     <string name="subtitle_shadow_opacity">Shadow opacity</string>
     <string name="subtitle_shadow_size">Shadow size</string>
     <string name="subtitle_reset_appearance">Reset appearance</string>
+    <string name="player_stream_details">Stream details</string>
+    <string name="player_current_file">Current file</string>
+    <string name="player_provider">Provider</string>
+    <string name="player_file_size">File size</string>
+    <string name="player_downloaded">Downloaded</string>
+    <string name="player_download_speed">Download speed</string>
+    <string name="player_peers">Peers</string>
+    <string name="player_buffered">Buffered</string>
+    <string name="player_status_playing">Playing</string>
+    <string name="player_status_streaming">Streaming</string>
+    <string name="player_status_connecting">Connecting</string>
+    <string name="player_file_status">Status</string>
 </resources>

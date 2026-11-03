@@ -32,6 +32,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nuvio.app.core.ui.nuvio
+import com.nuvio.app.features.p2p.P2pStreamingEngine
+import com.nuvio.app.features.p2p.P2pStreamingState
+import com.nuvio.app.features.p2p.formatP2pSpeed
 import com.nuvio.app.features.streams.IgnoredStreamEntry
 import com.nuvio.app.features.streams.IgnoredStreamsRepository
 import com.nuvio.app.features.streams.SmartPlayHdrPreference
@@ -42,7 +45,19 @@ import nuvio.composeapp.generated.resources.action_close
 import nuvio.composeapp.generated.resources.compose_player_audio
 import nuvio.composeapp.generated.resources.player_audio_auto
 import nuvio.composeapp.generated.resources.player_audio_change
+import nuvio.composeapp.generated.resources.player_buffered
+import nuvio.composeapp.generated.resources.player_current_file
+import nuvio.composeapp.generated.resources.player_download_speed
+import nuvio.composeapp.generated.resources.player_downloaded
 import nuvio.composeapp.generated.resources.player_file
+import nuvio.composeapp.generated.resources.player_file_size
+import nuvio.composeapp.generated.resources.player_file_status
+import nuvio.composeapp.generated.resources.player_peers
+import nuvio.composeapp.generated.resources.player_provider
+import nuvio.composeapp.generated.resources.player_status_connecting
+import nuvio.composeapp.generated.resources.player_status_playing
+import nuvio.composeapp.generated.resources.player_status_streaming
+import nuvio.composeapp.generated.resources.player_stream_details
 import nuvio.composeapp.generated.resources.player_file_ignored
 import nuvio.composeapp.generated.resources.player_file_restored
 import nuvio.composeapp.generated.resources.player_hdr
@@ -73,6 +88,24 @@ internal fun PlayerScreenRuntime.PlayerQuickSettingsPanel() {
     val currentAudio = currentAudioLabel()
     val sourceLoading = sourceStreamsState.isAnyLoading || sourceStreamsState.groups.any { it.isLoading }
     val hdrPreference = playerSettingsUiState.smartPlayHdrPreference
+    val p2pState by P2pStreamingEngine.state.collectAsStateWithLifecycle()
+    val fileSizeBytes = activeStream?.behaviorHints?.videoSize ?: 0L
+    val p2pStreaming = p2pState as? P2pStreamingState.Streaming
+    val downloadedBytes = p2pStreaming?.downloadedBytes ?: 0L
+    val downloadProgress = p2pStreaming?.totalProgress?.takeIf { it > 0f }?.let { (it * 100).toInt() }
+    val bufferedProgress = playbackSnapshot.durationMs.takeIf { it > 0L }?.let { duration ->
+        (playbackSnapshot.bufferedPositionMs.toFloat() / duration * 100f).toInt().takeIf { it > 0 }
+    }
+    val downloadSpeed = p2pStreaming?.downloadSpeed ?: 0L
+    val streamName = activeStream?.behaviorHints?.filename
+        ?: activeStream?.streamLabel
+        ?: activeStreamTitle.takeIf { it.isNotBlank() }
+    val providerName = activeStream?.addonName ?: activeProviderName.takeIf { it.isNotBlank() }
+    val playbackStatus = when {
+        p2pState is P2pStreamingState.Connecting -> stringResource(Res.string.player_status_connecting)
+        p2pStreaming != null -> stringResource(Res.string.player_status_streaming)
+        else -> stringResource(Res.string.player_status_playing)
+    }
 
     PlayerSidePanel(
         visible = showQuickSettingsPanel,
@@ -97,6 +130,40 @@ internal fun PlayerScreenRuntime.PlayerQuickSettingsPanel() {
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(22.dp),
             ) {
+                QuickSection(title = stringResource(Res.string.player_stream_details)) {
+                    QuickDetailRow(stringResource(Res.string.player_current_file), streamName)
+                    QuickDetailRow(stringResource(Res.string.player_provider), providerName)
+                    QuickDetailRow(
+                        stringResource(Res.string.player_quality),
+                        currentHeight?.let(::qualityLabel),
+                    )
+                    if (fileSizeBytes > 0L) {
+                        QuickDetailRow(stringResource(Res.string.player_file_size), formatFileSize(fileSizeBytes))
+                    }
+                    QuickDetailRow(stringResource(Res.string.player_file_status), playbackStatus)
+                    val downloadedText = when {
+                        fileSizeBytes > 0L && downloadProgress != null ->
+                            "${formatFileSize(downloadedBytes)} / ${formatFileSize(fileSizeBytes)} ($downloadProgress%)"
+                        bufferedProgress != null ->
+                            "${formatDurationMs(playbackSnapshot.bufferedPositionMs)} / " +
+                                "${formatDurationMs(playbackSnapshot.durationMs)} ($bufferedProgress%)"
+                        else -> null
+                    }
+                    QuickDetailRow(
+                        stringResource(
+                            if (downloadProgress != null) Res.string.player_downloaded else Res.string.player_buffered,
+                        ),
+                        downloadedText,
+                    )
+                    QuickDetailRow(
+                        stringResource(Res.string.player_download_speed),
+                        if (downloadSpeed > 0L) formatP2pSpeed(downloadSpeed) else "—",
+                    )
+                    if (p2pStreaming != null && p2pStreaming.peers > 0) {
+                        QuickDetailRow(stringResource(Res.string.player_peers), p2pStreaming.peers.toString())
+                    }
+                }
+
                 QuickSection(title = stringResource(Res.string.player_quality)) {
                     Row(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -248,6 +315,59 @@ internal fun PlayerScreenRuntime.PlayerIgnoredFilesPanel() {
             }
         }
     }
+}
+
+@Composable
+private fun QuickDetailRow(label: String, value: String?) {
+    if (value.isNullOrBlank()) return
+    val tokens = MaterialTheme.nuvio
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.weight(0.38f),
+            color = tokens.colors.textSecondary,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            text = value,
+            modifier = Modifier.weight(0.62f),
+            color = tokens.colors.textPrimary,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+        )
+    }
+}
+
+private fun formatFileSize(bytes: Long): String {
+    val mib = 1024.0 * 1024.0
+    return when {
+        bytes >= 1024L * 1024L * 1024L -> "${formatOneDecimal(bytes / (mib * 1024.0))} GB"
+        bytes >= 1024L * 1024L -> "${formatOneDecimal(bytes / mib)} MB"
+        bytes >= 1024L -> "${bytes / 1024L} KB"
+        else -> "$bytes B"
+    }
+}
+
+private fun formatDurationMs(ms: Long): String {
+    val totalSeconds = (ms / 1000L).coerceAtLeast(0L)
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0) {
+        "$hours:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+    } else {
+        "$minutes:${seconds.toString().padStart(2, '0')}"
+    }
+}
+
+private fun formatOneDecimal(value: Double): String {
+    val rounded = kotlin.math.round(value * 10.0) / 10.0
+    return rounded.toString()
 }
 
 @Composable
