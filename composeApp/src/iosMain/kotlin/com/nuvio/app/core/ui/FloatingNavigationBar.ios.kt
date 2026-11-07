@@ -18,7 +18,7 @@ internal actual fun FloatingNavigationBar(
     compactSize: Boolean,
     glowEnabled: Boolean,
 ) {
-    NuvioNavigationBar(modifier, scrollState, hazeState, contentPadding, compactSize) {
+    NuvioNavigationBar(modifier, scrollState, hazeState, NavBarStyle.ADAPTIVE, contentPadding, compactSize) {
         items.forEach { item ->
             when {
                 item.icon != null -> NavItem(

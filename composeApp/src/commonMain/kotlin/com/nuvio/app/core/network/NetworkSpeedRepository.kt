@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.concurrent.Volatile
 import kotlin.time.TimeSource
 
 data class NetworkSpeedSnapshot(
