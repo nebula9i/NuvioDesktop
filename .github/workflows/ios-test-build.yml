@@ -48,6 +48,10 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          # Build on a branch, not the default one: without this GitHub only restores the Gradle
+          # cache and every run recompiles from scratch on the slow hosted runner.
+          cache-read-only: false
 
       - name: Cache Kotlin Native
         uses: actions/cache@v5
