@@ -25,7 +25,9 @@ jobs:
     # xcode-27 was a self-hosted runner that does not exist on GitHub; the hosted macOS image
     # ships its own Xcode, so DEVELOPER_DIR is left unset and xcodebuild uses the default toolchain.
     runs-on: macos-15
-    timeout-minutes: ${{ inputs.configuration == 'Release' && 75 || 30 }}
+    # The hosted macOS runner is far slower than the self-hosted xcode-27 machine: a Release
+    # build needs well over an hour of Xcode + Kotlin/Native time there.
+    timeout-minutes: ${{ inputs.configuration == 'Release' && 240 || 90 }}
     env:
       GRADLE_OPTS: -Dfile.encoding=UTF-8
       IOS_CONFIGURATION: ${{ inputs.configuration }}
