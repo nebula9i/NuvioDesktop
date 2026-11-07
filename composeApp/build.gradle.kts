@@ -557,7 +557,12 @@ fun runtimeConfigBoolean(key: String, default: Boolean): Boolean =
 
 val generateRuntimeConfigs = tasks.register<GenerateRuntimeConfigsTask>("generateRuntimeConfigs") {
     outputDir.set(generatedRuntimeConfigDir)
-    localPropertiesFile.set(rootProject.layout.projectDirectory.file("local.properties"))
+    // Optional: a fresh clone (and CI) has no local.properties, and the property is @Optional, but
+    // Gradle rejects a set @InputFile whose target is missing - so only set it when it exists.
+    val localPropertiesPath = rootProject.layout.projectDirectory.file("local.properties")
+    if (localPropertiesPath.asFile.exists()) {
+        localPropertiesFile.set(localPropertiesPath)
+    }
     appVersionName.set(releaseAppVersionName)
     appVersionCode.set(releaseAppVersionCode)
     desktopAppVersionName.set(desktopReleaseVersionName)
