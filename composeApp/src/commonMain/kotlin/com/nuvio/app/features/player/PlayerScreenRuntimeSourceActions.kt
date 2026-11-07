@@ -13,6 +13,7 @@ import com.nuvio.app.features.p2p.P2pSettingsRepository
 import com.nuvio.app.features.p2p.P2pStreamingEngine
 import com.nuvio.app.features.servers.ServerPlayback
 import com.nuvio.app.features.servers.serverPlaybackMessage
+import com.nuvio.app.features.streams.StreamAutoPlayMode
 import com.nuvio.app.features.streams.StreamItem
 import com.nuvio.app.features.streams.StreamLinkCacheRepository
 import com.nuvio.app.features.streams.YouTubeStreamResolver
@@ -185,7 +186,11 @@ internal fun PlayerScreenRuntime.saveP2pStreamForReuse(
     season: Int?,
     episode: Int?,
 ) {
-    if (!playerSettingsUiState.streamReuseLastLinkEnabled || videoId == null) return
+    if (
+        videoId == null ||
+        (!playerSettingsUiState.streamReuseLastLinkEnabled &&
+            playerSettingsUiState.streamAutoPlayMode != StreamAutoPlayMode.SMART_PLAY)
+    ) return
     val infoHash = stream.p2pInfoHash ?: return
     val cacheKey = StreamLinkCacheRepository.contentKey(
         type = contentType ?: parentMetaType,
@@ -341,7 +346,12 @@ internal fun PlayerScreenRuntime.switchToSource(
     isSourceSwitchInProgress = true
     lastStablePositionMs = currentPositionMs
     val currentVideoId = activeVideoId
-    if (saveForReuse && playerSettingsUiState.streamReuseLastLinkEnabled && currentVideoId != null) {
+    if (
+        saveForReuse &&
+        currentVideoId != null &&
+        (playerSettingsUiState.streamReuseLastLinkEnabled ||
+            playerSettingsUiState.streamAutoPlayMode == StreamAutoPlayMode.SMART_PLAY)
+    ) {
         saveDirectStreamForReuse(stream, url, currentVideoId, activeSeasonNumber, activeEpisodeNumber)
     }
     externalSubtitles = stream.externalSubtitles
@@ -410,7 +420,11 @@ internal fun PlayerScreenRuntime.switchToEpisodeStream(
     stopActiveP2pStream()
     val epVideoId = episode.id
     val resume = serverResumeMs?.let { EpisodeResume(positionMs = it, fraction = null) } ?: resolveEpisodeResume(epVideoId, episode)
-    if (saveForReuse && playerSettingsUiState.streamReuseLastLinkEnabled) {
+    if (
+        saveForReuse &&
+        (playerSettingsUiState.streamReuseLastLinkEnabled ||
+            playerSettingsUiState.streamAutoPlayMode == StreamAutoPlayMode.SMART_PLAY)
+    ) {
         saveDirectStreamForReuse(stream, url, epVideoId, episode.season, episode.episode)
     }
     externalSubtitles = stream.externalSubtitles
@@ -542,6 +556,9 @@ internal fun PlayerScreenRuntime.playNextEpisode(automatic: Boolean = false) {
 
 internal fun PlayerScreenRuntime.openSourcesPanel() {
     val vid = activeVideoId ?: return
+    // Opening the list by hand means the viewer is taking over: give the automatic failover a
+    // fresh budget for whatever they pick next.
+    failoverAttempts = 0
     PlayerStreamsRepository.loadSources(
         type = contentType ?: parentMetaType,
         videoId = vid,

@@ -75,7 +75,7 @@ data class PlayerSettingsUiState(
     val vodCacheEnabled: Boolean = false,
     val vodCacheSizeMode: VodCacheSizeMode = VodCacheSizeMode.AUTO,
     val vodCacheSizeMb: Int = VodCacheSizing.DEFAULT_SIZE_MB,
-    val streamAutoPlayMode: StreamAutoPlayMode = StreamAutoPlayMode.MANUAL,
+    val streamAutoPlayMode: StreamAutoPlayMode = StreamAutoPlayMode.SMART_PLAY,
     val smartPlayHdrPreference: SmartPlayHdrPreference = SmartPlayHdrPreference.AUTO,
     val streamAutoPlaySource: StreamAutoPlaySource = StreamAutoPlaySource.ALL_SOURCES,
     val streamAutoPlaySelectedAddons: Set<String> = emptySet(),
@@ -163,7 +163,7 @@ object PlayerSettingsRepository {
     private var vodCacheEnabled = false
     private var vodCacheSizeMode = VodCacheSizeMode.AUTO
     private var vodCacheSizeMb = VodCacheSizing.DEFAULT_SIZE_MB
-    private var streamAutoPlayMode = StreamAutoPlayMode.MANUAL
+    private var streamAutoPlayMode = StreamAutoPlayMode.SMART_PLAY
     private var smartPlayHdrPreference = SmartPlayHdrPreference.AUTO
     private var streamAutoPlaySource = StreamAutoPlaySource.ALL_SOURCES
     private var streamAutoPlaySelectedAddons: Set<String> = emptySet()
@@ -257,7 +257,7 @@ object PlayerSettingsRepository {
         vodCacheSizeMode = VodCacheSizeMode.AUTO
         vodCacheSizeMb = VodCacheSizing.DEFAULT_SIZE_MB
         applyExoPlayerNativeMemory(false)
-        streamAutoPlayMode = StreamAutoPlayMode.MANUAL
+        streamAutoPlayMode = StreamAutoPlayMode.SMART_PLAY
         smartPlayHdrPreference = SmartPlayHdrPreference.AUTO
         streamAutoPlaySource = StreamAutoPlaySource.ALL_SOURCES
         streamAutoPlaySelectedAddons = emptySet()
@@ -398,9 +398,12 @@ object PlayerSettingsRepository {
             ?: PlaybackBufferSettings.DEFAULT_BACK_BUFFER_MS
         targetBufferSizeMb = PlayerSettingsStorage.loadTargetBufferSizeMb()
             ?: PlaybackBufferSettings.DEFAULT_TARGET_BUFFER_MB
-        streamAutoPlayMode = PlayerSettingsStorage.loadStreamAutoPlayMode()
+        val storedAutoPlayMode = PlayerSettingsStorage.loadStreamAutoPlayMode()
+        streamAutoPlayMode = storedAutoPlayMode
             ?.let { runCatching { StreamAutoPlayMode.valueOf(it) }.getOrNull() }
-            ?: StreamAutoPlayMode.MANUAL
+            ?: StreamAutoPlayMode.SMART_PLAY.also {
+                PlayerSettingsStorage.saveStreamAutoPlayMode(it.name)
+            }
         smartPlayHdrPreference = PlayerSettingsStorage.loadSmartPlayHdrPreference()
             ?.let { runCatching { SmartPlayHdrPreference.valueOf(it) }.getOrNull() }
             ?: SmartPlayHdrPreference.AUTO

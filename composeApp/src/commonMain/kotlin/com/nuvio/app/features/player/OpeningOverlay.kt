@@ -9,6 +9,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -49,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.nuvio.app.core.ui.NuvioBackButton
+import com.nuvio.app.core.ui.PlatformBackHandler
 import com.nuvio.app.core.ui.nuvioTypeScale
 import com.nuvio.app.core.ui.LocalVerticalBarPadding
 import com.nuvio.app.core.ui.centeredVerticalBarPadding
@@ -84,12 +87,24 @@ internal fun OpeningOverlay(
     )
     var logoLoadError by remember(logo) { mutableStateOf(false) }
     val logoUrl = logo?.takeIf { it.isNotBlank() }
+    val blockerInteraction = remember { MutableInteractionSource() }
+
+    PlatformBackHandler(enabled = true, onBack = onBack)
 
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black),
     ) {
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clickable(
+                    interactionSource = blockerInteraction,
+                    indication = null,
+                    onClick = {},
+                ),
+        )
         val logoWidth = minOf(320.dp, maxWidth - 48.dp)
         val logoHeight = minOf(180.dp, maxHeight * 0.4f)
         val titleFontSize = if (maxWidth < 600.dp) 30.sp else 42.sp

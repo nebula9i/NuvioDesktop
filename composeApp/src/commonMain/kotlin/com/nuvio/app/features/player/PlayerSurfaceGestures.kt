@@ -22,6 +22,7 @@ internal fun Modifier.playerSurfaceTapGestures(
     revealLockedOverlayState: State<() -> Unit>,
 ): Modifier =
     pointerInput(layoutSize, playbackGesturesEnabled) {
+        if (!playbackGesturesEnabled) return@pointerInput
         detectTapGestures(
             onPress = {
                 tryAwaitRelease()

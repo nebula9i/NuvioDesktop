@@ -1,8 +1,12 @@
 package com.nuvio.app
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.nuvio.app.features.player.OpeningOverlay
+import com.nuvio.app.features.player.OpeningOverlayActions
 import com.nuvio.app.features.player.subtitleLoadingStatusMessage
 import com.nuvio.app.features.streams.StreamLaunch
 import com.nuvio.app.features.streams.StreamsUiState
@@ -23,6 +27,8 @@ internal fun StreamLoadingScreen(
     resolvingYouTubeStream: Boolean = false,
     onBack: () -> Unit,
     preparingPlayback: Boolean = false,
+    onSourcesClick: (() -> Unit)? = null,
+    onEpisodesClick: (() -> Unit)? = null,
 ) {
     val message = when {
         !showStatus -> null
@@ -34,12 +40,22 @@ internal fun StreamLoadingScreen(
         state.autoPlayStream != null -> stringResource(Res.string.player_loading_preparing)
         else -> stringResource(Res.string.streams_finding_source)
     }
-    OpeningOverlay(
-        artwork = launch.background ?: launch.poster,
-        logo = launch.logo,
-        title = launch.title,
-        onBack = onBack,
-        horizontalSafePadding = 0.dp,
-        message = message,
-    )
+    Box(modifier = Modifier.fillMaxSize()) {
+        OpeningOverlay(
+            artwork = launch.background ?: launch.poster,
+            logo = launch.logo,
+            title = launch.title,
+            onBack = onBack,
+            horizontalSafePadding = 0.dp,
+            message = message,
+        )
+        // Same quick actions as the buffering page: without them the viewer was stuck on this
+        // screen until the automatic source search finished on its own.
+        if (onSourcesClick != null || onEpisodesClick != null) {
+            OpeningOverlayActions(
+                onSourcesClick = onSourcesClick,
+                onEpisodesClick = onEpisodesClick,
+            )
+        }
+    }
 }

@@ -1,6 +1,7 @@
 package com.nuvio.app.features.streams
 
 import com.nuvio.app.core.build.AppFeaturePolicy
+import com.nuvio.app.features.p2p.P2pSettingsRepository
 
 object StreamAutoPlaySelector {
 
@@ -226,7 +227,7 @@ object StreamAutoPlaySelector {
         playableDirectUrl != null ||
             serverTarget != null ||
             (
-                AppFeaturePolicy.p2pEnabled &&
+                P2pSettingsRepository.isPlaybackEnabled &&
                     needsLocalDebridResolve &&
                     p2pInfoHash != null &&
                     !isPendingDebridAutoPlay(debridEnabled, activeResolverProviderId)

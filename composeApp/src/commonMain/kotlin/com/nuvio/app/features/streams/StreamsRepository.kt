@@ -144,6 +144,10 @@ object StreamsRepository {
             persistedBingeGroup != null &&
             autoPlayMode == StreamAutoPlayMode.MANUAL
         val isDirectAutoPlayFlow = isAutoPlayEnabled || bingeGroupDirectFlow
+        log.d {
+            "auto_play mode=$autoPlayMode manual=$manualSelection enabled=$isAutoPlayEnabled " +
+                "bingeFlow=$bingeGroupDirectFlow direct=$isDirectAutoPlayFlow"
+        }
 
         if (isDirectAutoPlayFlow) {
             _uiState.value = StreamsUiState(
@@ -174,7 +178,17 @@ object StreamsRepository {
                 autoPlayDecided = true,
                 activeAddonIds = setOf("embedded"),
                 isAnyLoading = false,
+                isDirectAutoPlayFlow = isDirectAutoPlayFlow,
+                showDirectAutoPlayOverlay = isDirectAutoPlayFlow,
             )
+            // Embedded streams return before the auto-play machinery below exists; keep the flow
+            // flags so the caller can still decide, and log it for diagnosis.
+            log.d {
+                "embedded_streams count=" + embeddedStreams.size +
+                    " direct=" + isDirectAutoPlayFlow +
+                    " manual=" + manualSelection +
+                    " mode=" + autoPlayMode
+            }
             return
         }
 
@@ -684,7 +698,10 @@ object StreamsRepository {
             }
 
             if (isDirectAutoPlayFlow && !autoSelectTriggered) {
-                settleAutoPlay(evaluateAutoPlay())
+                val evaluation = evaluateAutoPlay()
+                if (evaluation.stream != null || !evaluation.hasPendingDebridCandidate) {
+                    settleAutoPlay(evaluation)
+                }
             }
             timeoutJob?.cancel()
         }
@@ -703,6 +720,21 @@ object StreamsRepository {
                         streams = group.streams.filterNot { IgnoredStreamsRepository.isIgnored(it, videoId) },
                     )
                 },
+            )
+        }
+    }
+
+    /**
+     * Lets the viewer take over while sources are still being searched: stops the automatic
+     * selection so the loading overlay drops and the source list becomes usable again.
+     */
+    fun dismissAutoPlayOverlay() {
+        _uiState.update {
+            it.copy(
+                showDirectAutoPlayOverlay = false,
+                isDirectAutoPlayFlow = false,
+                autoPlayStream = null,
+                autoPlayCandidates = emptyList(),
             )
         }
     }

@@ -1,5 +1,6 @@
 package com.nuvio.app.features.player
 
+import com.nuvio.app.core.ui.NuvioToastController
 import com.nuvio.app.features.debrid.DebridSettingsRepository
 import com.nuvio.app.features.details.parseRuntimeMinutes
 import com.nuvio.app.features.streams.IgnoredStreamsRepository
@@ -9,6 +10,22 @@ import com.nuvio.app.features.streams.currentSmartPlayContext
 import com.nuvio.app.features.streams.isSelectableForPlayback
 import com.nuvio.app.features.streams.mismatchesRequestedContent
 import com.nuvio.app.features.streams.streamQuality
+import kotlinx.coroutines.launch
+import nuvio.composeapp.generated.resources.Res
+import nuvio.composeapp.generated.resources.player_file_ignored
+import org.jetbrains.compose.resources.getString
+
+/** "S1E2 · Pilot" for episodes, the movie title otherwise. */
+internal fun PlayerScreenRuntime.activeContentLabel(): String = buildString {
+    val season = activeSeasonNumber
+    val episode = activeEpisodeNumber
+    if (season != null && episode != null) append("S${season}E${episode}")
+    val label = activeEpisodeTitle?.takeIf { it.isNotBlank() } ?: title
+    if (label.isNotBlank()) {
+        if (isNotEmpty()) append(" · ")
+        append(label)
+    }
+}
 
 internal fun PlayerScreenRuntime.openQuickSettings() {
     showQuickSettingsPanel = true
@@ -51,6 +68,7 @@ internal fun PlayerScreenRuntime.selectQuality(height: Int?) {
     } else {
         null
     }
+    val activeFileKey = activeStream?.let { IgnoredStreamsRepository.keyFor(it, activeVideoId) }
     val candidates = PlayerStreamsRepository.sourceState.value.groups.flatMap { it.streams }
         .filterNot {
             it.mismatchesRequestedContent(
@@ -61,6 +79,7 @@ internal fun PlayerScreenRuntime.selectQuality(height: Int?) {
             )
         }
         .filterNot { IgnoredStreamsRepository.isIgnored(it, activeVideoId) }
+        .filterNot { activeFileKey != null && IgnoredStreamsRepository.keyFor(it, activeVideoId) == activeFileKey }
     if (candidates.isEmpty()) return
 
     val debridEnabled = DebridSettingsRepository.snapshot().canResolvePlayableLinks
@@ -113,11 +132,17 @@ internal fun PlayerScreenRuntime.ignoreActiveFile(): Boolean {
         stream = stream,
         videoId = videoId,
         contentTitle = activeEpisodeTitle?.takeIf { it.isNotBlank() } ?: title,
-    ) ?: return false
+        contentLabel = activeContentLabel(),
+    )
 
     PlayerStreamsRepository.filterIgnored(videoId)
     StreamsRepository.filterIgnored(videoId)
+    scope.launch {
+        NuvioToastController.show(getString(Res.string.player_file_ignored))
+    }
     // Advance to the next eligible source instead of leaving the rejected file playing.
+    // Run this even when the file was already ignored, otherwise a repeat click leaves
+    // the rejected source playing.
     selectQuality(null)
     showQuickSettingsPanel = false
     return true

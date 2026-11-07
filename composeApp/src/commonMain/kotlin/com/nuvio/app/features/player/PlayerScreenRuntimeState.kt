@@ -151,6 +151,8 @@ internal class PlayerScreenRuntime(
 
     var gestureController: PlayerGestureController? = null
 
+    /** Mark taken when the video surface is tapped, consumed by the debug latency probe. */
+    var lastSurfaceTapMark: TimeMark? = null
     var controlsVisible by mutableStateOf(false)
     var controlsActivityTick by mutableStateOf(0)
     var showRemainingTime by mutableStateOf(false)
@@ -190,9 +192,28 @@ internal class PlayerScreenRuntime(
     var activeInitialPositionMs by mutableStateOf(initialPositionMs)
     var activeInitialProgressFraction by mutableStateOf(initialProgressFraction)
     var shouldPlay by mutableStateOf(true)
+
+    // Load watchdog: catches a source that never starts delivering data (no position, no buffer,
+    // no download speed) instead of leaving the player buffering forever.
+    var loadWatchdogStartedAtMs: Long? = null
+    var loadWatchdogPositionMs: Long = -1L
+    var loadWatchdogBufferedMs: Long = -1L
+    var failoverInProgress: Boolean = false
+    var failoverAttempts: Int = 0
     var resizeMode by mutableStateOf(playerSettingsUiState.resizeMode.supportedOnCurrentPlatform())
     var layoutSize by mutableStateOf(IntSize.Zero)
+    /**
+     * Compose-observable playback state. Updated at most once per second on mobile (see
+     * [forPlayerUi]) so that frequent engine updates do not recompose the whole player screen.
+     */
     var playbackSnapshot by mutableStateOf(PlayerPlaybackSnapshot())
+
+    /**
+     * Exact, non-observable copy of the latest engine snapshot. Read this from gestures, effects
+     * and seek math where a sub-second-accurate position is needed without subscribing the caller
+     * to recomposition.
+     */
+    var latestPlaybackSnapshot: PlayerPlaybackSnapshot = PlayerPlaybackSnapshot()
     var playbackSnapshotKey by mutableStateOf<PlaybackKey?>(null)
     var playerController by mutableStateOf<PlayerEngineController?>(null)
     var playerLifecycleController by mutableStateOf<PlayerEngineController?>(null)
@@ -233,6 +254,22 @@ internal class PlayerScreenRuntime(
     var pendingSeekScrobbleRestart by mutableStateOf(false)
     var hasSentCompletionScrobbleForCurrentItem by mutableStateOf(false)
     var currentTrackingMedia by mutableStateOf<TrackingMediaReference?>(null)
+
+    /** True while any player panel or modal is open; the chrome must not auto-hide then. */
+    val hasOpenPlayerPanel: Boolean
+        get() = showSourcesPanel ||
+            showEpisodesPanel ||
+            showChaptersPanel ||
+            showQuickSettingsPanel ||
+            showIgnoredFilesPanel ||
+            showAudioModal ||
+            showSubtitleModal ||
+            showVideoSettingsModal ||
+            showStreamInfo ||
+            showSubmitIntroModal ||
+            showSwitchEngineConfirm ||
+            showPartyPanel ||
+            showPartyChat
 
     var showSourcesPanel by mutableStateOf(false)
     var showEpisodesPanel by mutableStateOf(false)

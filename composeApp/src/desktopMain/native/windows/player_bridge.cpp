@@ -1864,7 +1864,10 @@ private:
         if (controller) {
             RECT webBounds = {0, 0, width, height};
             controller->put_Bounds(webBounds);
-            controller->put_IsVisible(TRUE);
+            // Keep the overlay hidden until its page has painted. A WebView2 that appears while it
+            // is still navigating shows its default white surface for a frame, which is the white
+            // flash between picking a stream and playback starting.
+            controller->put_IsVisible(controlsWebReady.load() ? TRUE : FALSE);
         }
     }
 
@@ -1934,6 +1937,10 @@ private:
 
         if (type == "controlsReady") {
             controlsWebReady.store(true);
+            // The page has painted: reveal the overlay now instead of on window creation.
+            if (controller) {
+                layoutNativeSubviews();
+            }
             flushPendingControlsJsonIfReady();
             syncControls();
             return;

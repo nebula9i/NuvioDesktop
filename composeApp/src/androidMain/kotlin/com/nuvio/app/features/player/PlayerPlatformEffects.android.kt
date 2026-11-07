@@ -35,11 +35,14 @@ actual fun LockPlayerToLandscape() {
     if (!activity.shouldForceLandscapePlayer()) return
 
     DisposableEffect(activity) {
-        val previousOrientation = activity.requestedOrientation
         activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
 
         onDispose {
-            activity.requestedOrientation = previousOrientation
+            // Restore the manifest default instead of the value captured on entry: the effect can
+            // re-enter while the activity is still landscape (episode switches, route churn), and
+            // restoring that captured value left the whole app locked to landscape - which Android
+            // then letterboxes with black bars on every side.
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
     }
 }

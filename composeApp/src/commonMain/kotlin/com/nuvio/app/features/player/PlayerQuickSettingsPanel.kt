@@ -23,6 +23,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -31,6 +33,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
+import com.nuvio.app.core.format.formatLocalDateTime
+import com.nuvio.app.core.ui.NuvioToastController
 import com.nuvio.app.core.ui.nuvio
 import com.nuvio.app.features.p2p.P2pStreamingEngine
 import com.nuvio.app.features.p2p.P2pStreamingState
@@ -38,6 +43,8 @@ import com.nuvio.app.features.p2p.formatP2pSpeed
 import com.nuvio.app.features.streams.IgnoredStreamEntry
 import com.nuvio.app.features.streams.IgnoredStreamsRepository
 import com.nuvio.app.features.streams.SmartPlayHdrPreference
+import com.nuvio.app.features.streams.SoftIgnoredStreamEntry
+import com.nuvio.app.features.streams.SoftIgnoredStreamsRepository
 import com.nuvio.app.features.streams.streamQuality
 import nuvio.composeapp.generated.resources.Res
 import nuvio.composeapp.generated.resources.action_back
@@ -66,6 +73,7 @@ import nuvio.composeapp.generated.resources.player_hdr_prefer
 import nuvio.composeapp.generated.resources.player_hdr_sdr
 import nuvio.composeapp.generated.resources.player_ignore_file
 import nuvio.composeapp.generated.resources.player_ignore_file_description
+import nuvio.composeapp.generated.resources.player_ignored_added_at
 import nuvio.composeapp.generated.resources.player_ignored_files
 import nuvio.composeapp.generated.resources.player_ignored_files_count
 import nuvio.composeapp.generated.resources.player_ignored_files_description
@@ -76,15 +84,23 @@ import nuvio.composeapp.generated.resources.player_quality_current
 import nuvio.composeapp.generated.resources.player_quality_unavailable
 import nuvio.composeapp.generated.resources.player_quick_settings
 import nuvio.composeapp.generated.resources.player_restore
+import nuvio.composeapp.generated.resources.player_soft_ignored_clear
+import nuvio.composeapp.generated.resources.player_soft_ignored_description
+import nuvio.composeapp.generated.resources.player_soft_ignored_failed_at
+import nuvio.composeapp.generated.resources.player_soft_ignored_title
 import nuvio.composeapp.generated.resources.player_sources_loading
 import org.jetbrains.compose.resources.stringResource
 
 @Composable
 internal fun PlayerScreenRuntime.PlayerQuickSettingsPanel() {
     val ignoredEntries by IgnoredStreamsRepository.entries.collectAsStateWithLifecycle()
+    val ignoredCountForContent = remember(ignoredEntries, activeVideoId) {
+        ignoredEntries.count { it.contentKey == activeVideoId }
+    }
     val ignoredMessage = stringResource(Res.string.player_file_ignored)
-    val heights = availableQualityHeights()
-    val currentHeight = currentPlaybackHeight()
+    val panelVisible = showQuickSettingsPanel
+    val heights = if (panelVisible) availableQualityHeights() else emptyList()
+    val currentHeight = if (panelVisible) currentPlaybackHeight() else null
     val currentAudio = currentAudioLabel()
     val sourceLoading = sourceStreamsState.isAnyLoading || sourceStreamsState.groups.any { it.isLoading }
     val hdrPreference = playerSettingsUiState.smartPlayHdrPreference
@@ -93,10 +109,26 @@ internal fun PlayerScreenRuntime.PlayerQuickSettingsPanel() {
     val p2pStreaming = p2pState as? P2pStreamingState.Streaming
     val downloadedBytes = p2pStreaming?.downloadedBytes ?: 0L
     val downloadProgress = p2pStreaming?.totalProgress?.takeIf { it > 0f }?.let { (it * 100).toInt() }
-    val bufferedProgress = playbackSnapshot.durationMs.takeIf { it > 0L }?.let { duration ->
-        (playbackSnapshot.bufferedPositionMs.toFloat() / duration * 100f).toInt().takeIf { it > 0 }
+    val bufferedText = if (panelVisible) {
+        val durationMs = playbackSnapshot.durationMs
+        val bufferedProgress = durationMs.takeIf { it > 0L }?.let {
+            (playbackSnapshot.bufferedPositionMs.toFloat() / it * 100f).toInt().takeIf { percent -> percent > 0 }
+        }
+        if (bufferedProgress != null) {
+            "${formatDurationMs(playbackSnapshot.bufferedPositionMs)} / " +
+                "${formatDurationMs(durationMs)} ($bufferedProgress%)"
+        } else {
+            null
+        }
+    } else {
+        null
     }
-    val downloadSpeed = p2pStreaming?.downloadSpeed ?: 0L
+    val downloadSpeed = if (panelVisible) {
+        p2pStreaming?.downloadSpeed?.takeIf { it > 0L }
+            ?: playbackSnapshot.networkSpeedBytesPerSecond
+    } else {
+        0L
+    }
     val streamName = activeStream?.behaviorHints?.filename
         ?: activeStream?.streamLabel
         ?: activeStreamTitle.takeIf { it.isNotBlank() }
@@ -144,10 +176,7 @@ internal fun PlayerScreenRuntime.PlayerQuickSettingsPanel() {
                     val downloadedText = when {
                         fileSizeBytes > 0L && downloadProgress != null ->
                             "${formatFileSize(downloadedBytes)} / ${formatFileSize(fileSizeBytes)} ($downloadProgress%)"
-                        bufferedProgress != null ->
-                            "${formatDurationMs(playbackSnapshot.bufferedPositionMs)} / " +
-                                "${formatDurationMs(playbackSnapshot.durationMs)} ($bufferedProgress%)"
-                        else -> null
+                        else -> bufferedText
                     }
                     QuickDetailRow(
                         stringResource(
@@ -241,7 +270,7 @@ internal fun PlayerScreenRuntime.PlayerQuickSettingsPanel() {
                         },
                     )
                     QuickRow(
-                        title = stringResource(Res.string.player_ignored_files_count, ignoredEntries.size),
+                        title = stringResource(Res.string.player_ignored_files_count, ignoredCountForContent),
                         subtitle = stringResource(Res.string.player_ignored_files_description),
                         onClick = { openIgnoredFiles() },
                     )
@@ -253,7 +282,18 @@ internal fun PlayerScreenRuntime.PlayerQuickSettingsPanel() {
 
 @Composable
 internal fun PlayerScreenRuntime.PlayerIgnoredFilesPanel() {
-    val entries by IgnoredStreamsRepository.entries.collectAsStateWithLifecycle()
+    val allEntries by IgnoredStreamsRepository.entries.collectAsStateWithLifecycle()
+    // Only the files ignored for the episode/movie that is playing right now.
+    val entries = remember(allEntries, activeVideoId) {
+        allEntries.filter { it.contentKey == activeVideoId }
+    }
+    val allSoftEntries by SoftIgnoredStreamsRepository.entries.collectAsStateWithLifecycle()
+    // Sources the automatic failover skipped after they failed to play (24h, not a user decision).
+    val softEntries = remember(allSoftEntries, activeVideoId) {
+        allSoftEntries
+            .filter { it.contentKey == activeVideoId }
+            .sortedByDescending { it.failedAtMs }
+    }
     val restoredMessage = stringResource(Res.string.player_file_restored)
     val tokens = MaterialTheme.nuvio
 
@@ -279,7 +319,7 @@ internal fun PlayerScreenRuntime.PlayerIgnoredFilesPanel() {
             }
             Spacer(Modifier.height(16.dp))
 
-            if (entries.isEmpty()) {
+            if (entries.isEmpty() && softEntries.isEmpty()) {
                 Text(
                     text = stringResource(Res.string.player_ignored_files_empty),
                     color = tokens.colors.textSecondary,
@@ -292,9 +332,48 @@ internal fun PlayerScreenRuntime.PlayerIgnoredFilesPanel() {
                         .fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    if (softEntries.isNotEmpty()) {
+                        item(key = "soft-ignored-header") {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = stringResource(Res.string.player_soft_ignored_title),
+                                        color = tokens.colors.textPrimary,
+                                        style = MaterialTheme.typography.titleSmall,
+                                    )
+                                    PlayerDialogButton(
+                                        label = stringResource(Res.string.player_soft_ignored_clear),
+                                        onClick = {
+                                            SoftIgnoredStreamsRepository.clearForContent(activeVideoId)
+                                        },
+                                    )
+                                }
+                                Text(
+                                    text = stringResource(Res.string.player_soft_ignored_description),
+                                    color = tokens.colors.textSecondary,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                        items(softEntries, key = { "soft-${it.key}" }) { entry ->
+                            SoftIgnoredFileRow(entry)
+                        }
+                    }
                     items(entries, key = { it.key }) { entry ->
                         IgnoredFileRow(
                             entry = entry,
+                            addedAtLabel = if (entry.ignoredAtMs > 0L) {
+                                stringResource(
+                                    Res.string.player_ignored_added_at,
+                                    formatLocalDateTime(entry.ignoredAtMs),
+                                )
+                            } else {
+                                ""
+                            },
                             onRestore = {
                                 IgnoredStreamsRepository.restore(entry)
                                 activeVideoId?.let { videoId ->
@@ -308,6 +387,7 @@ internal fun PlayerScreenRuntime.PlayerIgnoredFilesPanel() {
                                 }
                                 playerNotificationMessage = restoredMessage
                                 playerNotificationToken += 1
+                                scope.launch { NuvioToastController.show(restoredMessage) }
                             },
                         )
                     }
@@ -343,7 +423,7 @@ private fun QuickDetailRow(label: String, value: String?) {
     }
 }
 
-private fun formatFileSize(bytes: Long): String {
+internal fun formatFileSize(bytes: Long): String {
     val mib = 1024.0 * 1024.0
     return when {
         bytes >= 1024L * 1024L * 1024L -> "${formatOneDecimal(bytes / (mib * 1024.0))} GB"
@@ -353,7 +433,7 @@ private fun formatFileSize(bytes: Long): String {
     }
 }
 
-private fun formatDurationMs(ms: Long): String {
+internal fun formatDurationMs(ms: Long): String {
     val totalSeconds = (ms / 1000L).coerceAtLeast(0L)
     val hours = totalSeconds / 3600L
     val minutes = (totalSeconds % 3600L) / 60L
@@ -445,11 +525,16 @@ private fun QuickRow(
 }
 
 @Composable
-private fun IgnoredFileRow(entry: IgnoredStreamEntry, onRestore: () -> Unit) {
+private fun IgnoredFileRow(
+    entry: IgnoredStreamEntry,
+    addedAtLabel: String,
+    onRestore: () -> Unit,
+) {
     val tokens = MaterialTheme.nuvio
     val subtitle = listOfNotNull(
         entry.addonName?.takeIf { it.isNotBlank() },
-        entry.contentTitle?.takeIf { it.isNotBlank() },
+        entry.contentLabel.takeIf { it.isNotBlank() }
+            ?: entry.contentTitle?.takeIf { it.isNotBlank() },
     ).joinToString(" · ")
 
     Column(
@@ -476,11 +561,62 @@ private fun IgnoredFileRow(entry: IgnoredStreamEntry, onRestore: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        if (addedAtLabel.isNotBlank()) {
+            Text(
+                text = addedAtLabel,
+                color = tokens.colors.textMuted,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Spacer(Modifier.height(6.dp))
         PlayerDialogButton(
             label = stringResource(Res.string.player_restore),
             onClick = onRestore,
         )
+    }
+}
+
+@Composable
+private fun SoftIgnoredFileRow(entry: SoftIgnoredStreamEntry) {
+    val tokens = MaterialTheme.nuvio
+    val subtitle = listOfNotNull(
+        entry.addonName?.takeIf { it.isNotBlank() },
+        if (entry.failedAtMs > 0L) {
+            stringResource(
+                Res.string.player_soft_ignored_failed_at,
+                formatLocalDateTime(entry.failedAtMs),
+            )
+        } else {
+            null
+        },
+    ).joinToString(" · ")
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(tokens.colors.surfaceCard)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = entry.label.ifBlank { "Stream" },
+            color = tokens.colors.textPrimary,
+            style = MaterialTheme.typography.bodyLarge,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (subtitle.isNotBlank()) {
+            Text(
+                text = subtitle,
+                color = tokens.colors.textSecondary,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -498,8 +634,8 @@ private fun qualityLabel(height: Int): String = when {
 }
 
 private fun PlayerScreenRuntime.currentPlaybackHeight(): Int? =
-    playbackSnapshot.videoHeight.takeIf { it > 0 }
-        ?: activeStream?.streamQuality()?.height
+    activeStream?.streamQuality()?.height
+        ?: playbackSnapshot.videoHeight.takeIf { it > 0 }
 
 private fun PlayerScreenRuntime.availableQualityHeights(): List<Int> {
     val known = sourceStreamsState.groups

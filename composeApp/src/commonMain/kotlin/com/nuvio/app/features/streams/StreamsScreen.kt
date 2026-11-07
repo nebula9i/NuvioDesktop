@@ -100,6 +100,7 @@ import com.nuvio.app.features.debrid.DirectDebridPlayableResult
 import com.nuvio.app.features.debrid.DirectDebridPlaybackResolver
 import com.nuvio.app.features.debrid.toastMessage
 import com.nuvio.app.features.details.MetaScreenBackgroundMode
+import com.nuvio.app.features.p2p.P2pSettingsRepository
 import com.nuvio.app.features.player.PlayerSettingsRepository
 import com.nuvio.app.features.watchprogress.WatchProgressRepository
 import com.nuvio.app.features.watchprogress.WatchProgressEntry
@@ -1019,7 +1020,7 @@ private fun LazyListScope.streamSection(
             val isSelectable = stream.isSelectableForPlayback(debridEnabled)
             val isUnsupportedTorrentStream =
                 stream.needsLocalDebridResolve &&
-                    !AppFeaturePolicy.p2pEnabled &&
+                    !P2pSettingsRepository.isPlaybackEnabled &&
                     !(debridEnabled && stream.isAddonDebridCandidate)
             StreamCard(
                 stream = stream,

@@ -889,7 +889,9 @@ val buildWindowsPlayerBridge = tasks.register<Exec>("buildWindowsPlayerBridge") 
     outputs.file(windowsPlayerBridgeOutput)
     outputs.file(windowsPlayerBridgeImportLib)
     outputs.file(windowsPlayerBridgePdb)
-    onlyIf { !windowsPlayerBridgeOutput.get().asFile.exists() }
+    // No "only if the DLL is missing" guard here: the linker stamps the DLL with a fixed timestamp,
+    // so a stale bridge would silently survive C++ changes and the app would then fail at runtime
+    // with a missing JNI symbol. Gradle's input/output tracking rebuilds it when the source changes.
     commandLine(windowsPlayerBridgeCommand)
 }
 

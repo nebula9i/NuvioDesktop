@@ -115,6 +115,10 @@ internal expect object PlayerSettingsStorage {
     fun saveSmartPlayHdrPreference(value: String)
     fun loadIgnoredStreams(): String?
     fun saveIgnoredStreams(value: String)
+    fun loadSoftIgnoredStreams(): String?
+    fun saveSoftIgnoredStreams(value: String)
+    fun loadNetworkSpeed(): String?
+    fun saveNetworkSpeed(value: String)
     fun loadStreamAutoPlaySource(): String?
     fun saveStreamAutoPlaySource(source: String)
     fun loadStreamAutoPlaySelectedAddons(): Set<String>?

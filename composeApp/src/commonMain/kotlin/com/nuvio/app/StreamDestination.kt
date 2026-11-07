@@ -28,6 +28,7 @@ import com.nuvio.app.features.p2p.P2pSettingsRepository
 import com.nuvio.app.features.player.PlayerLaunch
 import com.nuvio.app.features.player.PlayerLaunchStore
 import com.nuvio.app.features.player.PlayerSettingsRepository
+import com.nuvio.app.features.player.PlayerSettingsUiState
 import com.nuvio.app.features.player.resolveContentLanguage
 import com.nuvio.app.features.player.sanitizePlaybackHeaders
 import com.nuvio.app.features.player.sanitizePlaybackResponseHeaders
@@ -35,6 +36,7 @@ import com.nuvio.app.features.servers.ServerPlayback
 import com.nuvio.app.features.servers.serverPlaybackMessage
 import com.nuvio.app.features.streams.StreamBehaviorHints
 import com.nuvio.app.features.streams.StreamItem
+import com.nuvio.app.features.streams.StreamAutoPlayMode
 import com.nuvio.app.features.streams.StreamLaunchStore
 import com.nuvio.app.features.streams.StreamLinkCacheRepository
 import com.nuvio.app.features.streams.StreamsRepository
@@ -181,7 +183,7 @@ internal fun StreamDestination(
     ) {
         val infoHash = stream.p2pInfoHash ?: return
         val sentinelUrl = p2pSentinelUrl(infoHash, stream.p2pFileIdx)
-        if (playerSettings.streamReuseLastLinkEnabled) {
+        if (streamCacheFirstEnabled(playerSettings)) {
             val cacheKey = StreamLinkCacheRepository.contentKey(
                 type = launch.type,
                 videoId = effectiveVideoId,
@@ -288,12 +290,12 @@ internal fun StreamDestination(
 
     var reuseHandled by rememberSaveable(launch.videoId, effectiveVideoId) { mutableStateOf(false) }
     var reuseNavigated by remember { mutableStateOf(false) }
-    LaunchedEffect(effectiveVideoId, hasResolvedVideoId, playerSettings.streamReuseLastLinkEnabled, launch.manualSelection) {
+    LaunchedEffect(effectiveVideoId, hasResolvedVideoId, playerSettings.streamReuseLastLinkEnabled, playerSettings.streamAutoPlayMode, launch.manualSelection) {
         if (!hasResolvedVideoId) return@LaunchedEffect
         if (reuseHandled) return@LaunchedEffect
         reuseHandled = true
         if (launch.manualSelection) return@LaunchedEffect
-        if (!playerSettings.streamReuseLastLinkEnabled) return@LaunchedEffect
+        if (!streamCacheFirstEnabled(playerSettings)) return@LaunchedEffect
         val cacheKey = StreamLinkCacheRepository.contentKey(
             type = launch.type,
             videoId = effectiveVideoId,
@@ -305,6 +307,7 @@ internal fun StreamDestination(
         val cached = StreamLinkCacheRepository.getValid(cacheKey, maxAgeMs)
         if (cached != null) {
             if (cached.url.isBlank() && !cached.infoHash.isNullOrBlank()) {
+                if (!P2pSettingsRepository.isPlaybackEnabled) return@LaunchedEffect
                 val cachedStream = StreamItem(
                     name = cached.streamName,
                     url = null,
@@ -483,7 +486,7 @@ internal fun StreamDestination(
         }
         autoPlayHandled = true
         val serverResumeMs = serverResumePositionMs(stream)
-        if (playerSettings.streamReuseLastLinkEnabled && stream.serverTarget == null) {
+        if (streamCacheFirstEnabled(playerSettings) && stream.serverTarget == null) {
             val cacheKey = StreamLinkCacheRepository.contentKey(
                 type = launch.type,
                 videoId = effectiveVideoId,
@@ -552,6 +555,14 @@ internal fun StreamDestination(
         }
     }
 
+    // Escape hatch for the automatic source search: stop the decision so the source list becomes
+    // usable instead of the loading screen covering it until the search finishes on its own.
+    val cancelSourceSearch: () -> Unit = {
+        autoPlayNavigationStarted = false
+        autoPlayHandled = false
+        StreamsRepository.dismissAutoPlayOverlay()
+    }
+
     if (!hasResolvedVideoId) {
         if (showLoadingScreen) {
             StreamLoadingScreen(
@@ -560,6 +571,7 @@ internal fun StreamDestination(
                 showStatus = playerSettings.showPlayerLoadingStatus,
                 resolvingDebridStream = false,
                 onBack = onBack,
+                onEpisodesClick = onBack,
             )
             return
         }
@@ -679,7 +691,7 @@ internal fun StreamDestination(
             return
         }
         val sourceUrl = stream.playableDirectUrl ?: return
-        if (saveForReuse && playerSettings.streamReuseLastLinkEnabled && stream.serverTarget == null) {
+        if (saveForReuse && streamCacheFirstEnabled(playerSettings) && stream.serverTarget == null) {
             val cacheKey = StreamLinkCacheRepository.contentKey(
                 type = launch.type,
                 videoId = effectiveVideoId,
@@ -853,7 +865,12 @@ internal fun StreamDestination(
                 resolvingYouTubeStream = resolvingYouTubeStream,
                 onBack = onBack,
                 preparingPlayback = preparingServerStream,
+                onSourcesClick = cancelSourceSearch,
+                onEpisodesClick = onBack,
             )
         }
     }
 }
+
+private fun streamCacheFirstEnabled(settings: PlayerSettingsUiState): Boolean =
+    settings.streamReuseLastLinkEnabled || settings.streamAutoPlayMode == StreamAutoPlayMode.SMART_PLAY

@@ -13,6 +13,7 @@ import com.nuvio.app.features.watchprogress.WatchProgressPlaybackSession
 import com.nuvio.app.features.watchprogress.WatchProgressRepository
 import com.nuvio.app.features.watchprogress.buildPlaybackVideoId
 import com.nuvio.app.features.watching.domain.isShortPlaceholderDuration
+import com.nuvio.app.isDesktop
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -34,17 +35,23 @@ internal fun PlayerScreenRuntime.updatePlaybackSnapshot(
 ): Boolean {
     if (playbackKey != activePlaybackKey) return false
     val reported = if (partyRateNudge != null) snapshot.copy(playbackSpeed = partyBaseRate()) else snapshot
-    playbackSnapshot = if (reported.durationMs <= 0L && playbackSnapshotKey == playbackKey) {
+    val latest = if (reported.durationMs <= 0L && playbackSnapshotKey == playbackKey) {
         reported.copy(durationMs = playbackSnapshot.durationMs)
     } else {
         reported
     }
+    latestPlaybackSnapshot = latest
+    // Mobile engines report every frame; publish a quantised projection so reading the playback
+    // state from composition does not invalidate the whole player screen 30-60 times per second.
+    playbackSnapshot = if (isDesktop) latest else latest.forPlayerUi()
     playbackSnapshotKey = playbackKey
     playbackSnapshotMark = TimeSource.Monotonic.markNow()
     if (!snapshot.isLoading && initialSeekApplied && !isSourceSwitchInProgress) {
         lastStablePositionMs = snapshot.positionMs.coerceAtLeast(0L)
     }
     trackStallDowngrade(playbackSnapshot)
+    trackLoadWatchdog(snapshot)
+    trackEarlyPlaybackEnd(snapshot)
     val targetPositionMs = scrubbingPositionMs ?: return true
     if (!isScrubbingTimeline && (
             !snapshot.isLoading || snapshot.isEnded ||

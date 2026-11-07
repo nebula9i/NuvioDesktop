@@ -2,6 +2,7 @@ package com.nuvio.app.features.player
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -420,6 +421,7 @@ internal fun PlayerScreenRuntime.deactivateHoldToSpeed() {
 @Composable
 internal fun PlayerScreenRuntime.rememberSurfaceGestureCallbacks(): PlayerSurfaceGestureCallbacks {
     val onSurfaceTap = rememberUpdatedState { offset: Offset ->
+        lastSurfaceTapMark = TimeSource.Monotonic.markNow()
         if (playerControlsLocked) {
             revealLockedOverlay()
             return@rememberUpdatedState
@@ -464,20 +466,32 @@ internal fun PlayerScreenRuntime.rememberSurfaceGestureCallbacks(): PlayerSurfac
         isHoldToSpeedGestureActive = rememberUpdatedState(isHoldToSpeedGestureActive),
         touchGesturesEnabled = rememberUpdatedState(playerSettingsUiState.touchGesturesEnabled),
         playerControlsLocked = rememberUpdatedState(playerControlsLocked),
-        currentPositionMs = rememberUpdatedState(playbackSnapshot.positionMs.coerceAtLeast(0L)),
-        currentDurationMs = rememberUpdatedState(playbackSnapshot.durationMs),
+        currentPositionMs = rememberSurfaceValue { latestPlaybackSnapshot.positionMs.coerceAtLeast(0L) },
+        currentDurationMs = rememberSurfaceValue { latestPlaybackSnapshot.durationMs },
         commitHorizontalSeek = rememberUpdatedState { requestedPositionMs: Long ->
             val targetPositionMs = if (isPartyControlLocked) {
                 ownSeekTarget(requestedPositionMs) ?: return@rememberUpdatedState
             } else {
                 requestedPositionMs
             }
-            lastManualSkipSeekPositions = playbackSnapshot.positionMs to targetPositionMs
+            lastManualSkipSeekPositions = latestPlaybackSnapshot.positionMs to targetPositionMs
             playerController?.seekTo(targetPositionMs)
             scheduleProgressSyncAfterSeek()
             publishPartyPlayback(positionMs = targetPositionMs)
         },
     )
+}
+
+/**
+ * [State] whose value is produced by [read] on every access. Unlike `rememberUpdatedState` this
+ * never reads the playback snapshot during composition, so gesture handlers can ask for the current
+ * position without making the whole player screen recompose on every engine tick.
+ */
+@Composable
+private fun <T> rememberSurfaceValue(read: () -> T): State<T> = remember { SurfaceValueState(read) }
+
+private class SurfaceValueState<T>(private val read: () -> T) : State<T> {
+    override val value: T get() = read()
 }
 
 private val PendingSeekWindow = 1_500.milliseconds

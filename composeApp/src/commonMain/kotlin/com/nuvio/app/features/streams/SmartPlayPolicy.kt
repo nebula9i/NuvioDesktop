@@ -3,6 +3,7 @@ package com.nuvio.app.features.streams
 import com.nuvio.app.core.build.AppFeaturePolicy
 import com.nuvio.app.core.display.currentDisplayCapability
 import com.nuvio.app.core.network.NetworkSpeedRepository
+import com.nuvio.app.features.p2p.P2pSettingsRepository
 
 data class SmartPlayContext(
     val displayMaxHeightPx: Int,
@@ -111,10 +112,12 @@ internal object SmartPlayPolicy {
     }
 
     private fun readiness(stream: StreamItem, debridEnabled: Boolean): Int = when {
+        // Already stored on the debrid provider: starts instantly, no download, no dead link.
+        debridEnabled && stream.isCachedDebridTorrentStream -> CACHED
         stream.serverTarget != null || stream.playableDirectUrl != null -> READY
-        debridEnabled && (stream.isDirectDebridStream || stream.isCachedDebridTorrentStream) -> READY
+        debridEnabled && stream.isDirectDebridStream -> READY
         debridEnabled && stream.isAddonDebridCandidate -> DEBRID_CANDIDATE
-        AppFeaturePolicy.p2pEnabled &&
+        P2pSettingsRepository.isPlaybackEnabled &&
             stream.needsLocalDebridResolve &&
             stream.p2pInfoHash != null -> P2P
         else -> OTHER
@@ -183,8 +186,9 @@ internal object SmartPlayPolicy {
         val originalIndex: Int,
     )
 
-    private const val READY = 0
-    private const val DEBRID_CANDIDATE = 1
-    private const val P2P = 2
-    private const val OTHER = 3
+    private const val CACHED = 0
+    private const val READY = 1
+    private const val DEBRID_CANDIDATE = 2
+    private const val P2P = 3
+    private const val OTHER = 4
 }

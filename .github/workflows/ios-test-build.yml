@@ -22,10 +22,11 @@ concurrency:
 jobs:
   build:
     name: Build unsigned full ${{ inputs.configuration }} IPA
-    runs-on: xcode-27
+    # xcode-27 was a self-hosted runner that does not exist on GitHub; the hosted macOS image
+    # ships its own Xcode, so DEVELOPER_DIR is left unset and xcodebuild uses the default toolchain.
+    runs-on: macos-15
     timeout-minutes: ${{ inputs.configuration == 'Release' && 75 || 30 }}
     env:
-      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
       GRADLE_OPTS: -Dfile.encoding=UTF-8
       IOS_CONFIGURATION: ${{ inputs.configuration }}
       KOTLIN_DAEMON_JVMARGS: -Xmx2048M
@@ -41,7 +42,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6

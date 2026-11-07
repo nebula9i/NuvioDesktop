@@ -19,6 +19,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -239,23 +243,27 @@ private fun EntityBrowseContent(
                     )
                 }
             } else {
-                val scrollState = rememberScrollState()
+                // Lazy so only the rails on screen compose (and request artwork). Composing every
+                // rail at once fired hundreds of image requests and made posters drop out.
+                val listState = rememberLazyListState()
                 Box(modifier = Modifier.fillMaxSize()) {
-                    Column(
+                    LazyColumn(
+                        state = listState,
                         modifier = Modifier
                             .fillMaxSize()
-                            .verticalScroll(scrollState)
                             .windowInsetsPadding(WindowInsets.statusBars)
                             .padding(top = 56.dp),
+                        contentPadding = PaddingValues(bottom = 32.dp),
                     ) {
-                        EntityHeroSection(
-                            header = data.header,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 16.dp),
-                        )
-
-                        data.rails.forEach { rail ->
+                        item(key = "entity-hero") {
+                            EntityHeroSection(
+                                header = data.header,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 16.dp),
+                            )
+                        }
+                        itemsIndexed(data.rails) { _, rail ->
                             DetailPosterRailSection(
                                 title = entityRailTitle(rail),
                                 items = rail.items,
@@ -266,11 +274,9 @@ private fun EntityBrowseContent(
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                         }
-
-                        Spacer(modifier = Modifier.height(32.dp))
                     }
                     NuvioDesktopVerticalScrollbar(
-                        state = scrollState,
+                        state = listState,
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
                             .fillMaxHeight()
@@ -324,20 +330,21 @@ private fun WideEntityBrowseContent(
                 )
             }
         } else {
-            val scrollState = rememberScrollState()
+            val listState = rememberLazyListState()
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
             ) {
-                Column(
+                LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .verticalScroll(scrollState)
-                        .padding(start = 40.dp, bottom = 40.dp),
+                        .padding(start = 40.dp),
+                    contentPadding = PaddingValues(bottom = 40.dp),
                     verticalArrangement = Arrangement.spacedBy(34.dp),
                 ) {
-                    data.rails.forEach { rail ->
+                    itemsIndexed(data.rails) { _, rail ->
                         DetailPosterRailSection(
                             title = entityRailTitle(rail),
                             items = rail.items,
@@ -349,7 +356,7 @@ private fun WideEntityBrowseContent(
                     }
                 }
                 NuvioDesktopVerticalScrollbar(
-                    state = scrollState,
+                    state = listState,
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
                         .fillMaxHeight()

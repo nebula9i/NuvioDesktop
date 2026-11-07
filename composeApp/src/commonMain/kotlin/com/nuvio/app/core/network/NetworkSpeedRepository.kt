@@ -1,6 +1,7 @@
 package com.nuvio.app.core.network
 
 import co.touchlab.kermit.Logger
+import com.nuvio.app.features.player.PlayerSettingsStorage
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsChannel
@@ -42,11 +43,32 @@ object NetworkSpeedRepository {
     @Volatile
     private var refreshInFlight = false
 
-    fun snapshot(): NetworkSpeedSnapshot? = snapshot
+    @Volatile
+    private var persistedLoaded = false
+
+    /**
+     * The last measured speed, or null when nothing has ever been measured.
+     *
+     * The result is persisted, so the very first run of a fresh install is the only time Smart Play
+     * has no speed to work with: with no value it ranks by display height alone (no bandwidth cap)
+     * and the probe started by [refreshIfStale] fills in every later selection - in this session and
+     * in all later ones.
+     */
+    fun snapshot(): NetworkSpeedSnapshot? {
+        if (!persistedLoaded) {
+            persistedLoaded = true
+            val stored = runCatching { PlayerSettingsStorage.loadNetworkSpeed() }.getOrNull()
+            val parsed = stored?.let(::parseStored)
+            if (parsed != null && snapshot == null) {
+                snapshot = parsed
+            }
+        }
+        return snapshot
+    }
 
     fun refreshIfStale(ttlMs: Long = CACHE_TTL_MS) {
         if (refreshInFlight) return
-        val current = snapshot
+        val current = snapshot()
         val now = nowMs()
         if (current != null && now - current.measuredAtMs < ttlMs) return
 
@@ -56,10 +78,16 @@ object NetworkSpeedRepository {
                 val measured = measureDownload()
                 if (measured != null) {
                     log.d { "Download probe measured $measured Mbps" }
-                    snapshot = NetworkSpeedSnapshot(
+                    val next = NetworkSpeedSnapshot(
                         downloadMbps = measured,
                         measuredAtMs = nowMs(),
                     )
+                    snapshot = next
+                    runCatching {
+                        PlayerSettingsStorage.saveNetworkSpeed(
+                            next.downloadMbps.toString() + ":" + next.measuredAtMs
+                        )
+                    }
                 } else {
                     log.d { "Download probe unavailable; Smart Play will use the display cap" }
                 }
@@ -107,6 +135,15 @@ object NetworkSpeedRepository {
                 downloadMbps(totalBytes, durationMs)
             }.getOrNull()
         }
+
+    private fun parseStored(raw: String): NetworkSpeedSnapshot? {
+        val parts = raw.split(':')
+        if (parts.size != 2) return null
+        val mbps = parts[0].toDoubleOrNull() ?: return null
+        val measuredAt = parts[1].toLongOrNull() ?: return null
+        if (mbps <= 0.0 || measuredAt <= 0L) return null
+        return NetworkSpeedSnapshot(downloadMbps = mbps, measuredAtMs = measuredAt)
+    }
 
     private fun nowMs(): Long = kotlin.time.Clock.System.now().toEpochMilliseconds()
 }

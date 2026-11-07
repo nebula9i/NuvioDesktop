@@ -47,6 +47,12 @@ const openingOverlay = document.getElementById("openingOverlay");
 const openingArtwork = document.getElementById("openingArtwork");
 const openingBackButton = document.getElementById("openingBackButton");
 const openingFullscreenButton = document.getElementById("openingFullscreenButton");
+const openingSourcesButton = document.getElementById("openingSourcesButton");
+const openingSourcesLabel = document.getElementById("openingSourcesLabel");
+const openingEpisodesButton = document.getElementById("openingEpisodesButton");
+const openingEpisodesLabel = document.getElementById("openingEpisodesLabel");
+const openingQuickSettingsButton = document.getElementById("openingQuickSettingsButton");
+const openingQuickSettingsLabel = document.getElementById("openingQuickSettingsLabel");
 const openingFullscreenIcon = document.getElementById("openingFullscreenIcon");
 const openingLogoSlot = document.getElementById("openingLogoSlot");
 const openingLogoBase = document.getElementById("openingLogoBase");
@@ -224,6 +230,24 @@ let state = {
   episodeText: "",
   streamTitle: "",
   providerName: "",
+  streamDetailsLabel: "Stream details",
+  currentFileLabel: "Current file",
+  providerLabel: "Provider",
+  fileSizeLabel: "File size",
+  fileStatusLabel: "Status",
+  downloadedLabel: "Downloaded",
+  bufferedLabel: "Buffered",
+  downloadSpeedLabel: "Download speed",
+  peersLabel: "Peers",
+  streamDetailsFile: "",
+  streamDetailsProvider: "",
+  streamDetailsQuality: "",
+  streamDetailsSize: "",
+  streamDetailsStatus: "",
+  streamDetailsProgressLabel: "",
+  streamDetailsProgress: "",
+  streamDetailsSpeed: "",
+  streamDetailsPeers: "",
   pauseOverlayEnabled: false,
   pauseOverlayWatchingLabel: "You're watching",
   pauseOverlayLogo: "",
@@ -264,6 +288,10 @@ let state = {
   currentQualityHeight: 0,
   hdrPreference: 0,
   ignoredItems: [],
+  softIgnoredTitle: "",
+  softIgnoredDescription: "",
+  softIgnoredClearLabel: "",
+  softIgnoredItems: [],
   episodesLabel: "Episodes",
   externalPlayerLabel: "External",
   playLabel: "Play",
@@ -1098,7 +1126,7 @@ const setModalVisibility = (modal, visible, animated = true) => {
   modalCloseTimers.set(modal, timer);
 };
 
-const closePlayerModal = (notifyDismiss = false, animated = true) => {
+const closePlayerModal = (notifyDismiss = false, animated = true, notifyEpisodes = true) => {
   const closingModal = activeModal;
   activeModal = "";
   if (fontPickerOpen) setFontPickerOpen(false);
@@ -1108,7 +1136,7 @@ const closePlayerModal = (notifyDismiss = false, animated = true) => {
   if (notifyDismiss && closingModal === "p2pConsent") {
     send("cancelP2pForPlayerControls", 0);
   }
-  if (closingModal === "episodes") onEpisodesModalClosed();
+  if (closingModal === "episodes" && notifyEpisodes) onEpisodesModalClosed();
   if (closingModal === "party") onPartyModalClosed();
   renderChrome();
 };
@@ -2038,6 +2066,8 @@ const appendEpisodeRow = (container, item) => {
   row.addEventListener("click", event => {
     event.stopPropagation();
     send("selectEpisode", Number(item.index) || 0);
+    showPlayerToast(state.sourcesLoadingLabel || "Finding sources…");
+    closePlayerModal(false, true, false);
   });
 
   const thumb = document.createElement("span");
@@ -2506,10 +2536,46 @@ const quickSettingsNote = text => {
   return note;
 };
 
+const quickSettingsDetailRow = (label, value) => {
+  const row = document.createElement("div");
+  row.className = "quick-settings-detail-row";
+  const key = document.createElement("span");
+  key.className = "quick-settings-detail-label";
+  key.textContent = label;
+  const text = document.createElement("span");
+  text.className = "quick-settings-detail-value";
+  text.textContent = value;
+  row.appendChild(key);
+  row.appendChild(text);
+  return row;
+};
+
+// Live rows (status / progress / speed / peers) are updated in place: they change several times
+// per second, and rebuilding the panel for them made the modal flicker and swallow clicks.
+let quickSettingsLiveDetails = {};
+
+const updateQuickSettingsLiveDetails = () => {
+  const values = {
+    status: state.streamDetailsStatus,
+    progress: state.streamDetailsProgress,
+    speed: state.streamDetailsSpeed,
+    peers: state.streamDetailsPeers,
+  };
+  Object.entries(values).forEach(([key, value]) => {
+    const row = quickSettingsLiveDetails[key];
+    if (!row) return;
+    const text = String(value || "");
+    const valueEl = row.querySelector(".quick-settings-detail-value");
+    if (valueEl && valueEl.textContent !== text) valueEl.textContent = text;
+    row.style.display = text.trim() ? "" : "none";
+  });
+};
+
 const renderQuickSettingsModal = () => {
   quickSettingsPanelTitle.textContent = state.quickSettingsLabel || "Settings";
   const options = Array.isArray(state.qualityOptions) ? state.qualityOptions : [];
   const ignored = Array.isArray(state.ignoredItems) ? state.ignoredItems : [];
+  const softIgnored = Array.isArray(state.softIgnoredItems) ? state.softIgnoredItems : [];
   const selectedHeight = Number(state.selectedQualityHeight) || 0;
   const signature = JSON.stringify([
     options.map(option => [Number(option.height) || 0, String(option.label || "")]),
@@ -2517,11 +2583,49 @@ const renderQuickSettingsModal = () => {
     String(state.currentQualityLabel || ""),
     Boolean(state.sourceIsLoading),
     Number(state.hdrPreference) || 0,
-    ignored.map(item => [String(item.label || ""), String(item.subtitle || "")]),
+    ignored.map(item => [
+      String(item.label || ""),
+      String(item.subtitle || ""),
+      String(item.addedAtLabel || ""),
+    ]),
+    softIgnored.map(item => [String(item.label || ""), String(item.subtitle || "")]),
+    String(state.streamDetailsFile || ""),
+    String(state.streamDetailsProvider || ""),
+    String(state.streamDetailsQuality || ""),
+    String(state.streamDetailsSize || ""),
+    String(state.streamDetailsProgressLabel || ""),
   ]);
-  if (quickSettingsBody.dataset.signature === signature) return;
+  if (quickSettingsBody.dataset.signature === signature) {
+    updateQuickSettingsLiveDetails();
+    return;
+  }
   quickSettingsBody.dataset.signature = signature;
   quickSettingsBody.textContent = "";
+  quickSettingsLiveDetails = {};
+
+  const detailsSection = quickSettingsSection(state.streamDetailsLabel || "Stream details");
+  [
+    [state.currentFileLabel || "Current file", state.streamDetailsFile, null],
+    [state.providerLabel || "Provider", state.streamDetailsProvider, null],
+    [state.qualityLabel || "Quality", state.streamDetailsQuality, null],
+    [state.fileSizeLabel || "File size", state.streamDetailsSize, null],
+    [state.fileStatusLabel || "Status", state.streamDetailsStatus, "status"],
+    [state.streamDetailsProgressLabel || state.downloadedLabel || "Downloaded", state.streamDetailsProgress, "progress"],
+    [state.downloadSpeedLabel || "Download speed", state.streamDetailsSpeed, "speed"],
+    [state.peersLabel || "Peers", state.streamDetailsPeers, "peers"],
+  ].forEach(([label, value, liveKey]) => {
+    if (liveKey) {
+      const row = quickSettingsDetailRow(label, String(value || ""));
+      quickSettingsLiveDetails[liveKey] = row;
+      detailsSection.appendChild(row);
+      return;
+    }
+    if (value && String(value).trim()) {
+      detailsSection.appendChild(quickSettingsDetailRow(label, String(value)));
+    }
+  });
+  quickSettingsBody.appendChild(detailsSection);
+  updateQuickSettingsLiveDetails();
 
   const qualitySection = quickSettingsSection(state.qualityLabel || "Quality");
   const qualityChips = quickSettingsChips();
@@ -2584,9 +2688,12 @@ const renderQuickSettingsModal = () => {
     fileSection.appendChild(quickSettingsNote(state.ignoredFilesEmptyLabel || "No ignored files."));
   } else {
     ignored.forEach((item, index) => {
+      const subtitle = [String(item.subtitle || ""), String(item.addedAtLabel || "")]
+        .filter(part => part.trim())
+        .join(" · ");
       const row = quickSettingsRow(
         String(item.label || "Stream"),
-        String(item.subtitle || ""),
+        subtitle,
         () => {
           send("restoreIgnored", index);
           showPlayerToast(state.fileRestoredLabel || "File restored");
@@ -2604,6 +2711,31 @@ const renderQuickSettingsModal = () => {
       row.appendChild(restore);
       fileSection.appendChild(row);
     });
+  }
+  if (softIgnored.length) {
+    const softHeader = document.createElement("div");
+    softHeader.className = "quick-settings-section-title";
+    softHeader.textContent = state.softIgnoredTitle || "Temporarily skipped (24h)";
+    fileSection.appendChild(softHeader);
+    if (state.softIgnoredDescription) {
+      fileSection.appendChild(quickSettingsNote(state.softIgnoredDescription));
+    }
+    softIgnored.forEach(item => {
+      fileSection.appendChild(quickSettingsRow(
+        String(item.label || "Stream"),
+        String(item.subtitle || ""),
+        () => {},
+      ));
+    });
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "panel-button";
+    clear.textContent = state.softIgnoredClearLabel || "Clear";
+    clear.addEventListener("click", event => {
+      event.stopPropagation();
+      send("clearSoftIgnored", 0);
+    });
+    fileSection.appendChild(clear);
   }
   quickSettingsBody.appendChild(fileSection);
 };
@@ -2953,7 +3085,9 @@ const renderChrome = () => {
   const showError = renderPlaybackError();
   root.classList.toggle("pip-mode", Boolean(state.isInPip));
   if (!state.isInPip && isPipLocked) setPipLocked(false);
-  root.classList.toggle("chrome-hidden", Boolean(showError || !state.controlsVisible));
+  // Never hide the chrome while a panel/modal is open: the auto-hide timer in the host kept
+  // flipping controlsVisible, which made the settings panel flicker and swallow clicks.
+  root.classList.toggle("chrome-hidden", Boolean(showError || !state.controlsVisible) && !activeModal);
   root.classList.toggle("modal-open", Boolean(activeModal));
   root.classList.toggle("info-open", activeModal === "streamInfo");
   root.classList.toggle("source-visible", Boolean(!showError && !isPlaying && !state.isLoading && (state.streamTitle || state.providerName)));
@@ -2971,6 +3105,9 @@ const renderChrome = () => {
   speedLabel.textContent = state.playbackSpeedLabel || "1x";
   subtitlesLabel.textContent = state.subtitlesLabel || "Subs";
   audioLabel.textContent = state.audioLabel || "Audio";
+  openingSourcesLabel.textContent = state.sourcesLabel || "Sources";
+  openingEpisodesLabel.textContent = state.episodesLabel || "Episodes";
+  openingQuickSettingsLabel.textContent = state.quickSettingsLabel || "Settings";
   quickSettingsLabel.textContent = state.quickSettingsLabel || "Settings";
   sourcesLabel.textContent = state.sourcesLabel || "Sources";
   episodesLabel.textContent = state.episodesLabel || "Episodes";

@@ -492,6 +492,7 @@ private fun PlayerScreenRuntime.BindPlayerUiVisibilityEffects() {
         snapshotSignals.isLoading,
         showParentalGuide,
         errorMessage,
+        hasOpenPlayerPanel,
     ) {
         if (
             !controlsVisible ||
@@ -499,7 +500,10 @@ private fun PlayerScreenRuntime.BindPlayerUiVisibilityEffects() {
             !playbackSnapshot.isPlaying ||
             playbackSnapshot.isLoading ||
             showParentalGuide ||
-            errorMessage != null
+            errorMessage != null ||
+            // Hiding the chrome while a panel is open made the desktop settings panel flicker and
+            // swallow clicks, because the panel lives inside the chrome.
+            hasOpenPlayerPanel
         ) {
             return@LaunchedEffect
         }
@@ -588,6 +592,9 @@ private fun PlayerScreenRuntime.BindPlayerMetadataAndSkipEffects() {
         val profile = if (profileId == com.nuvio.app.features.profiles.ProfileRepository.activeProfileId) shuffleProfile
             else EpisodeShuffleRepository.readProfile(profileId)
         profile.settings(parentMetaId, parentMetaType)
+    }
+    val positionSeconds by remember(this) {
+        derivedStateOf { playbackSnapshot.positionMs / 1_000L }
     }
 
     LaunchedEffect(
@@ -697,7 +704,7 @@ private fun PlayerScreenRuntime.BindPlayerMetadataAndSkipEffects() {
     }
 
     LaunchedEffect(
-        playbackSnapshot.positionMs,
+        positionSeconds,
         playbackSnapshot.isLoading,
         skipIntervals,
         playerSettingsUiState.autoSkipSegmentTypes,

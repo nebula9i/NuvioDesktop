@@ -16,11 +16,19 @@ data class IgnoredStreamEntry(
     val addonName: String? = null,
     val contentTitle: String? = null,
     val ignoredAtMs: Long = 0L,
+    /**
+     * Content the file was ignored for - the episode or movie video id. Ignoring a bad file for
+     * S04E01 only hides it for S04E01; the same release stays available everywhere else.
+     * Empty on entries written before scoping existed; those are migrated to [videoId] on load.
+     */
+    val contentKey: String = "",
+    /** Human readable content label, e.g. "S1E2 · Pilot" or the movie title. */
+    val contentLabel: String = "",
 )
 
 /**
- * Files the viewer explicitly rejected. The key includes the requested video id, so
- * ignoring a bad S4E1 file does not hide the same release for another episode.
+ * Files the viewer explicitly rejected. Entries are scoped to the content they were ignored for
+ * and are kept newest first, so the most recently ignored file is always at the top.
  */
 object IgnoredStreamsRepository {
     private val json = Json { ignoreUnknownKeys = true }
@@ -36,24 +44,42 @@ object IgnoredStreamsRepository {
         _entries.value = raw
             ?.let { stored -> runCatching { json.decodeFromString<List<IgnoredStreamEntry>>(stored) }.getOrNull() }
             .orEmpty()
+            // Entries written before scoping existed carry no content key; their video id is the
+            // content they were ignored for, so use it instead of dropping them.
+            .map { entry ->
+                if (entry.contentKey.isBlank()) entry.copy(contentKey = entry.videoId) else entry
+            }
+            .sortedByDescending { it.ignoredAtMs }
     }
 
     fun isIgnored(stream: StreamItem, videoId: String?): Boolean {
         if (videoId.isNullOrBlank()) return false
         ensureLoaded()
         val key = keyFor(stream, videoId)
-        return _entries.value.any { it.key == key }
+        return _entries.value.any { it.key == key && it.contentKey == videoId }
+    }
+
+    /** Ignored files for one episode/movie, newest first. */
+    fun entriesForContent(videoId: String?): List<IgnoredStreamEntry> {
+        if (videoId.isNullOrBlank()) return emptyList()
+        ensureLoaded()
+        return _entries.value.filter { it.contentKey == videoId }
     }
 
     // The file identity is what matters; the requested video id is only stored for display.
     // This still works when an episode is reached through a different addon-specific video id.
     fun keyFor(stream: StreamItem, videoId: String? = null): String = stream.identityKey()
 
-    fun ignore(stream: StreamItem, videoId: String, contentTitle: String?): IgnoredStreamEntry? {
+    fun ignore(
+        stream: StreamItem,
+        videoId: String,
+        contentTitle: String?,
+        contentLabel: String = "",
+    ): IgnoredStreamEntry? {
         if (videoId.isBlank()) return null
         ensureLoaded()
         val key = keyFor(stream, videoId)
-        if (_entries.value.any { it.key == key }) return null
+        if (_entries.value.any { it.key == key && it.contentKey == videoId }) return null
 
         val entry = IgnoredStreamEntry(
             key = key,
@@ -62,8 +88,11 @@ object IgnoredStreamsRepository {
             addonName = stream.addonName,
             contentTitle = contentTitle,
             ignoredAtMs = kotlin.time.Clock.System.now().toEpochMilliseconds(),
+            contentKey = videoId,
+            contentLabel = contentLabel,
         )
-        _entries.value = _entries.value + entry
+        // Newest first: the list is shown in insertion order, most recent on top.
+        _entries.value = listOf(entry) + _entries.value
         persist()
         return entry
     }

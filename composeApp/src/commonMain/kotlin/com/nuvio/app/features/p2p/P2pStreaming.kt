@@ -46,6 +46,12 @@ object P2pSettingsRepository {
     val isVisible: Boolean
         get() = AppFeaturePolicy.p2pEnabled
 
+    val isPlaybackEnabled: Boolean
+        get() {
+            ensureLoaded()
+            return AppFeaturePolicy.p2pEnabled && uiState.value.p2pEnabled
+        }
+
     private var hasLoaded = false
     private var p2pEnabled = false
     private var enableUpload = true

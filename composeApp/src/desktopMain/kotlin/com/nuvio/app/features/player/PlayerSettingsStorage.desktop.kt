@@ -77,6 +77,8 @@ internal actual object PlayerSettingsStorage {
     private const val streamAutoPlayModeKey = "stream_auto_play_mode"
     private const val smartPlayHdrPreferenceKey = "smart_play_hdr_preference"
     private const val ignoredStreamsKey = "ignored_streams"
+private const val softIgnoredStreamsKey = "soft_ignored_streams"
+private const val networkSpeedKey = "network_speed_mbps_timestamp"
     private const val streamAutoPlaySourceKey = "stream_auto_play_source"
     private const val streamAutoPlaySelectedAddonsKey = "stream_auto_play_selected_addons"
     private const val streamAutoPlaySelectedPluginsKey = "stream_auto_play_selected_plugins"
@@ -332,6 +334,10 @@ internal actual object PlayerSettingsStorage {
     actual fun saveSmartPlayHdrPreference(value: String) = saveString(smartPlayHdrPreferenceKey, value)
     actual fun loadIgnoredStreams(): String? = loadString(ignoredStreamsKey)
     actual fun saveIgnoredStreams(value: String) = saveString(ignoredStreamsKey, value)
+    actual fun loadSoftIgnoredStreams(): String? = loadString(softIgnoredStreamsKey)
+    actual fun saveSoftIgnoredStreams(value: String) = saveString(softIgnoredStreamsKey, value)
+    actual fun loadNetworkSpeed(): String? = loadString(networkSpeedKey)
+    actual fun saveNetworkSpeed(value: String) = saveString(networkSpeedKey, value)
     actual fun loadStreamAutoPlaySource(): String? = loadString(streamAutoPlaySourceKey)
     actual fun saveStreamAutoPlaySource(source: String) = saveString(streamAutoPlaySourceKey, source)
     actual fun loadStreamAutoPlaySelectedAddons(): Set<String>? = loadStringSet(streamAutoPlaySelectedAddonsKey)

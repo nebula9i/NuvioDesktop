@@ -57,6 +57,9 @@ fun main(args: Array<String>) {
     if (System.getProperty("os.name", "").lowercase().contains("linux")) {
         runCatching { NativePlayerBridge.initGtkEarly() }
     }
+    // Icons are small; keep ImageIO from spooling them through temp cache files, which fails on
+    // machines where the temp directory is locked down and used to abort the composition.
+    ImageIO.setUseCache(false)
     applyDesktopRendererPreference()
     SentryInitializer.start()
     configureDesktopQuickJsLibrary()
@@ -144,10 +147,15 @@ fun main(args: Array<String>) {
             LaunchedEffect(window, appIconState.selected) {
                 val backgroundSuffix = "-transparent"
                 val iconPath = "icons/app-icon-${appIconState.selected.key}$backgroundSuffix.png"
-                Thread.currentThread().contextClassLoader.getResourceAsStream(iconPath)?.use { stream ->
-                    ImageIO.read(stream)?.let { image ->
-                        window.iconImages = listOf(image)
+                // A failure here must never take the composition down with it.
+                runCatching {
+                    Thread.currentThread().contextClassLoader.getResourceAsStream(iconPath)?.use { stream ->
+                        ImageIO.read(stream)?.let { image ->
+                            window.iconImages = listOf(image)
+                        }
                     }
+                }.onFailure { error ->
+                    System.err.println("Nuvio: failed to load window icon $iconPath: ${error.message}")
                 }
             }
 

@@ -103,11 +103,33 @@ data class PlayerControlInfoSection(
     val items: List<PlayerControlInfoItem> = emptyList(),
 )
 
+data class PlayerControlStreamDetails(
+    val title: String = "Stream details",
+    val currentFileLabel: String = "Current file",
+    val providerLabel: String = "Provider",
+    val fileSizeLabel: String = "File size",
+    val fileStatusLabel: String = "Status",
+    val downloadedLabel: String = "Downloaded",
+    val bufferedLabel: String = "Buffered",
+    val downloadSpeedLabel: String = "Download speed",
+    val peersLabel: String = "Peers",
+    val file: String = "",
+    val provider: String = "",
+    val quality: String = "",
+    val size: String = "",
+    val status: String = "",
+    val progressLabel: String = "",
+    val progress: String = "",
+    val speed: String = "",
+    val peers: String = "",
+)
+
 data class PlayerControlsState(
     val title: String = "",
     val episodeText: String = "",
     val streamTitle: String = "",
     val providerName: String = "",
+    val streamDetails: PlayerControlStreamDetails = PlayerControlStreamDetails(),
     val pauseOverlayEnabled: Boolean = true,
     val pauseOverlayWatchingLabel: String = "You're watching",
     val pauseOverlayLogo: String? = null,
@@ -134,19 +156,13 @@ data class PlayerControlsState(
     val hdrPreferLabel: String = "Prefer HDR",
     val hdrSdrLabel: String = "Prefer SDR",
     val fileLabel: String = "File",
-    val ignoreFileLabel: String = "Ignore this file",
-    val ignoreFileDescription: String = "Hide it from future source lists for this episode.",
-    val ignoredFilesLabel: String = "Ignored files",
-    val ignoredFilesDescription: String = "Restore a file you ignored by accident.",
-    val ignoredFilesEmptyLabel: String = "No ignored files.",
-    val restoreLabel: String = "Restore",
-    val fileIgnoredLabel: String = "File ignored",
-    val fileRestoredLabel: String = "File restored",
+    val ignoredFiles: PlayerControlIgnoredFiles = PlayerControlIgnoredFiles(),
     val qualityOptions: List<PlayerControlQualityOption> = emptyList(),
     val selectedQualityHeight: Int = 0,
     val currentQualityHeight: Int = 0,
     val hdrPreference: Int = 0,
     val ignoredItems: List<PlayerControlIgnoredItem> = emptyList(),
+    val softIgnored: PlayerControlSoftIgnored = PlayerControlSoftIgnored(),
     val episodesLabel: String = "Episodes",
     val externalPlayerLabel: String = "External",
     val playLabel: String = "Play",
@@ -354,6 +370,30 @@ data class PlayerControlQualityOption(
 data class PlayerControlIgnoredItem(
     val label: String = "",
     val subtitle: String = "",
+    val addedAtLabel: String = "",
+)
+
+/**
+ * Ignored-file labels, grouped so [PlayerControlsState] stays below the JVM limit of 255
+ * constructor parameter slots (it is already close; see the soft-ignored group below).
+ */
+data class PlayerControlIgnoredFiles(
+    val label: String = "Ignored files",
+    val description: String = "Restore a file you ignored by accident.",
+    val emptyLabel: String = "No ignored files.",
+    val restoreLabel: String = "Restore",
+    val fileIgnoredLabel: String = "File ignored",
+    val fileRestoredLabel: String = "File restored",
+    val ignoreFileLabel: String = "Ignore this file",
+    val ignoreFileDescription: String = "Hide it from future source lists for this episode.",
+)
+
+/** Sources the automatic failover skipped after they failed to play. */
+data class PlayerControlSoftIgnored(
+    val title: String = "",
+    val description: String = "",
+    val clearLabel: String = "",
+    val items: List<PlayerControlIgnoredItem> = emptyList(),
 )
 
 data class PlayerControlSeasonItem(

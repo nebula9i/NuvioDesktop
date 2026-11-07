@@ -73,6 +73,8 @@ actual object PlayerSettingsStorage {
     private const val streamAutoPlayModeKey = "stream_auto_play_mode"
     private const val smartPlayHdrPreferenceKey = "smart_play_hdr_preference"
     private const val ignoredStreamsKey = "ignored_streams"
+private const val softIgnoredStreamsKey = "soft_ignored_streams"
+private const val networkSpeedKey = "network_speed_mbps_timestamp"
     private const val streamAutoPlaySourceKey = "stream_auto_play_source"
     private const val streamAutoPlaySelectedAddonsKey = "stream_auto_play_selected_addons"
     private const val streamAutoPlaySelectedPluginsKey = "stream_auto_play_selected_plugins"
@@ -766,6 +768,20 @@ actual object PlayerSettingsStorage {
 
     actual fun saveIgnoredStreams(value: String) {
         NSUserDefaults.standardUserDefaults.setObject(value, forKey = ProfileScopedKey.of(ignoredStreamsKey))
+    }
+
+    actual fun loadSoftIgnoredStreams(): String? =
+        NSUserDefaults.standardUserDefaults.stringForKey(ProfileScopedKey.of(softIgnoredStreamsKey))
+
+    actual fun saveSoftIgnoredStreams(value: String) {
+        NSUserDefaults.standardUserDefaults.setObject(value, forKey = ProfileScopedKey.of(softIgnoredStreamsKey))
+    }
+
+    actual fun loadNetworkSpeed(): String? =
+        NSUserDefaults.standardUserDefaults.stringForKey(ProfileScopedKey.of(networkSpeedKey))
+
+    actual fun saveNetworkSpeed(value: String) {
+        NSUserDefaults.standardUserDefaults.setObject(value, forKey = ProfileScopedKey.of(networkSpeedKey))
     }
 
     actual fun loadStreamAutoPlaySource(): String? {

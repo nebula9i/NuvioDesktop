@@ -284,6 +284,8 @@ internal fun PauseMetadataOverlay(
 internal fun ErrorModal(
     message: String,
     onDismiss: () -> Unit,
+    secondaryLabel: String? = null,
+    onSecondary: (() -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
@@ -312,6 +314,26 @@ internal fun ErrorModal(
                 maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (secondaryLabel != null && onSecondary != null) {
+                Surface(
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .widthIn(min = 180.dp, max = 260.dp)
+                        .clickable(onClick = onSecondary),
+                    color = MaterialTheme.colorScheme.secondary,
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text(
+                        text = secondaryLabel,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        style = MaterialTheme.nuvioTypeScale.bodyLg.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSecondary,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
             Surface(
                 modifier = Modifier
                     .padding(top = 4.dp)

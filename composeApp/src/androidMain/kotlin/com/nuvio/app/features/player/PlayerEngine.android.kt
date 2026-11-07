@@ -68,6 +68,8 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.text.TextOutput
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.upstream.BandwidthMeter
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.extractor.ts.TsExtractor
@@ -102,9 +104,13 @@ import java.io.File
 import java.net.URI
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 private const val TAG = "NuvioPlayer"
 private const val PLAYER_DIAGNOSTIC_TAG = "NuvioPlayerDiag"
+
+/** Minimum spacing between snapshot publications driven by continuous playback position updates. */
+private const val CONTINUOUS_SNAPSHOT_INTERVAL_MS = 250L
 
 private class PlaybackDiagnostics {
     var prepareStartedAtMs: Long = 0L
@@ -243,6 +249,9 @@ private fun ExoPlayerSurface(
     val latestOnInitialPositionHandled = rememberUpdatedState(onInitialPositionHandled)
     val latestPlayWhenReady = rememberUpdatedState(playWhenReady)
     val coroutineScope = rememberCoroutineScope()
+    val exoBandwidthMeter = remember(context) {
+        DefaultBandwidthMeter.Builder(context).build()
+    }
 
     val playerSettings = remember {
         PlayerSettingsRepository.ensureLoaded()
@@ -470,6 +479,7 @@ private fun ExoPlayerSurface(
             .setAudioAttributes(playbackAudioAttributes, true)
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
+            .setBandwidthMeter(exoBandwidthMeter)
 
         val player = if (useLibass) {
             // Set render scale before building the player
@@ -542,7 +552,7 @@ private fun ExoPlayerSurface(
     }
 
     fun dispatchExoPlayerSnapshot() {
-        val snapshot = exoPlayer.snapshot()
+        val snapshot = exoPlayer.snapshot(exoBandwidthMeter)
         latestOnSnapshot.value(snapshot)
         nowPlayingController.syncPlayback(snapshot)
     }
@@ -749,7 +759,7 @@ private fun ExoPlayerSurface(
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
-                latestOnSnapshot.value(exoPlayer.snapshot())
+                latestOnSnapshot.value(exoPlayer.snapshot(exoBandwidthMeter))
                 if (videoSize.width > 0 && videoSize.height > 0) {
                     videoAspectRatio = videoSize.width.toFloat() / videoSize.height.toFloat()
                 }
@@ -1140,7 +1150,7 @@ private fun ExoPlayerSurface(
     LaunchedEffect(exoPlayer) {
         while (isActive) {
             dispatchExoPlayerSnapshot()
-            delay(250L)
+            delay(500L)
         }
     }
 
@@ -1221,6 +1231,7 @@ private fun LibmpvPlayerSurface(
     val latestOnSnapshot = rememberUpdatedState(onSnapshot)
     val latestOnError = rememberUpdatedState(onError)
     val latestPlayWhenReady = rememberUpdatedState(playWhenReady)
+    val latestResizeMode = rememberUpdatedState(resizeMode)
     val coroutineScope = rememberCoroutineScope()
     val playbackDiagnostics = remember { PlaybackDiagnostics() }
     val sanitizedSourceHeaders = remember(sourceHeaders) {
@@ -1286,7 +1297,18 @@ private fun LibmpvPlayerSurface(
 
     DisposableEffect(playerViewRef, nowPlayingController) {
         val view = playerViewRef ?: return@DisposableEffect onDispose {}
-        fun dispatchSnapshot(updateKeepScreenOn: Boolean = false) {
+        // libmpv reports "time-pos" on every frame (~30-60 Hz). Publishing each report ran a full
+        // property snapshot (a dozen JNI reads) and a Compose state write per frame, saturating
+        // both the mpv and the main thread. Continuous updates are coalesced; discrete events
+        // (pause, seek, buffering, end) still publish immediately so the UI reacts instantly.
+        val continuousDispatchGate = AtomicLong(0L)
+        fun dispatchSnapshot(updateKeepScreenOn: Boolean = false, continuous: Boolean = false) {
+            if (continuous) {
+                val now = SystemClock.elapsedRealtime()
+                val last = continuousDispatchGate.get()
+                if (now - last < CONTINUOUS_SNAPSHOT_INTERVAL_MS) return
+                if (!continuousDispatchGate.compareAndSet(last, now)) return
+            }
             coroutineScope.launch(Dispatchers.Main.immediate) {
                 val snapshot = view.snapshot()
                 latestOnSnapshot.value(snapshot)
@@ -1325,8 +1347,9 @@ private fun LibmpvPlayerSurface(
                 if (property == "sub-text" || property == "sid") view.updateStyledSubtitle()
             }
             override fun eventProperty(property: String, value: Double) {
-                if (property == "duration" || property == "time-pos" || property == "speed") {
-                    dispatchSnapshot()
+                when (property) {
+                    "time-pos" -> dispatchSnapshot(continuous = true)
+                    "duration", "speed" -> dispatchSnapshot()
                 }
             }
             override fun eventProperty(property: String, value: MPVNode) {
@@ -1353,7 +1376,13 @@ private fun LibmpvPlayerSurface(
                     }
                     MPV.mpvEvent.MPV_EVENT_FILE_LOADED,
                     MPV.mpvEvent.MPV_EVENT_PLAYBACK_RESTART -> {
-                        if (eventId == MPV.mpvEvent.MPV_EVENT_FILE_LOADED) view.attachStartupSubtitles()
+                        if (eventId == MPV.mpvEvent.MPV_EVENT_FILE_LOADED) {
+                            view.attachStartupSubtitles()
+                            // mpv resets per-file properties on loadfile; re-apply the resize mode
+                            // once the new file is actually loaded so the picture does not fall
+                            // back to "Fit" with black bars after a source switch.
+                            view.applyResizeMode(latestResizeMode.value)
+                        }
                         coroutineScope.launch(Dispatchers.Main.immediate) {
                             latestOnError.value(null)
                             val snapshot = view.snapshot()
@@ -1449,6 +1478,10 @@ private fun LibmpvPlayerSurface(
             externalSubtitles = externalSubtitles,
             playWhenReady = latestPlayWhenReady.value,
         )
+        // mpv resets per-file properties (panscan / video-aspect-override) on loadfile, so the
+        // resize mode has to be re-applied after every source switch - otherwise the picture drops
+        // back to "Fit" with black bars after switching sources (e.g. when ignoring a file).
+        view.applyResizeMode(resizeMode)
     }
 
     LaunchedEffect(playerViewRef, playWhenReady) {
@@ -1460,7 +1493,7 @@ private fun LibmpvPlayerSurface(
         nowPlayingController?.syncPlayback(snapshot)
     }
 
-    LaunchedEffect(playerViewRef, resizeMode) {
+    LaunchedEffect(playerViewRef, resizeMode, sourceUrl) {
         playerViewRef?.applyResizeMode(resizeMode)
     }
 
@@ -1481,7 +1514,7 @@ private fun LibmpvPlayerSurface(
             latestOnSnapshot.value(snapshot)
             nowPlayingController?.syncPlayback(snapshot)
             view.keepScreenOn = snapshot.isPlaying || snapshot.isLoading
-            delay(250L)
+            delay(500L)
         }
     }
 
@@ -1750,6 +1783,11 @@ private class NuvioLibmpvView(
         val videoHeight = mpv.getPropertyInt("video-out-params/dh")
             ?: mpv.getPropertyInt("video-params/dh")
             ?: 0
+        val networkSpeedBytesPerSecond = mpv.getPropertyLong("cache-speed")
+            ?.takeIf { it > 0L }
+            ?: mpv.getPropertyLong("demuxer-cache-state/raw-input-rate")
+                ?.takeIf { it > 0L }
+            ?: 0L
         return PlayerPlaybackSnapshot(
             isLoading = isLoading,
             isPlaying = !paused && !isLoading && !idle && !ended,
@@ -1760,6 +1798,7 @@ private class NuvioLibmpvView(
             playbackSpeed = (mpv.getPropertyDouble("speed") ?: 1.0).toFloat(),
             videoWidth = videoWidth,
             videoHeight = videoHeight,
+            networkSpeedBytesPerSecond = if (paused || ended) 0L else networkSpeedBytesPerSecond,
         )
     }
 
@@ -2122,8 +2161,10 @@ private const val MPV_SUBTITLE_FONT_SIZE_MIN = 36
 private const val MPV_SUBTITLE_FONT_SIZE_MAX = 122
 private const val MPV_SUBTITLE_OUTLINE_SIZE_SCALE = 1.5
 
-private fun ExoPlayer.snapshot(): PlayerPlaybackSnapshot {
+private fun ExoPlayer.snapshot(bandwidthMeter: BandwidthMeter? = null): PlayerPlaybackSnapshot {
     val (videoWidth, videoHeight) = videoDimensions()
+    val estimatedBitsPerSecond = bandwidthMeter?.bitrateEstimate?.takeIf { it > 0L }
+        ?: videoFormat?.bitrate?.toLong()?.takeIf { it > 0L }
     return PlayerPlaybackSnapshot(
         isLoading = playbackState == Player.STATE_IDLE || playbackState == Player.STATE_BUFFERING,
         isPlaying = isPlaying,
@@ -2134,6 +2175,11 @@ private fun ExoPlayer.snapshot(): PlayerPlaybackSnapshot {
         playbackSpeed = playbackParameters.speed,
         videoWidth = videoWidth,
         videoHeight = videoHeight,
+        networkSpeedBytesPerSecond = if (playWhenReady && playbackState != Player.STATE_ENDED) {
+            (estimatedBitsPerSecond ?: 0L) / 8L
+        } else {
+            0L
+        },
     )
 }
 

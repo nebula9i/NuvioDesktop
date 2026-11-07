@@ -1024,7 +1024,7 @@ private fun TimePill(
 }
 
 @Composable
-private fun PlayerActionPillButton(
+internal fun PlayerActionPillButton(
     label: String,
     onClick: () -> Unit,
     icon: ImageVector? = null,

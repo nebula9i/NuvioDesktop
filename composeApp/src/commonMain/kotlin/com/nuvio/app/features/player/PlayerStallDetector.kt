@@ -87,6 +87,7 @@ internal fun PlayerScreenRuntime.trackStallDowngrade(snapshot: PlayerPlaybackSna
 
 internal fun PlayerScreenRuntime.resetStallDetection() {
     stallDetector.reset()
+    resetLoadWatchdog()
     // The new source starts with its own initial buffer; ignore it before counting stalls.
     stallDetector.onSeek(kotlin.time.Clock.System.now().toEpochMilliseconds() + SWITCH_GRACE_MS)
     showStallDowngradeOffer = false

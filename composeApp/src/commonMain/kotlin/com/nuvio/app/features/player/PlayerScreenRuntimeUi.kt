@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
@@ -45,6 +46,7 @@ import com.nuvio.app.features.p2p.formatP2pSpeed
 import com.nuvio.app.features.player.skip.SkipIntroRepository
 import com.nuvio.app.features.streams.AddonStreamGroup
 import com.nuvio.app.features.streams.IgnoredStreamsRepository
+import com.nuvio.app.features.streams.SoftIgnoredStreamsRepository
 import com.nuvio.app.features.streams.SmartPlayHdrPreference
 import com.nuvio.app.features.streams.StreamBadgeSettingsRepository
 import com.nuvio.app.features.streams.StreamItem
@@ -56,6 +58,7 @@ import com.nuvio.app.features.autosync.AutoSyncSyncedSubtitle
 import com.nuvio.app.isDesktop
 import com.nuvio.app.features.player.skip.internalSkipAction
 import com.nuvio.app.features.servers.ServerStreams
+import com.nuvio.app.core.format.formatLocalDateTime
 import com.nuvio.app.features.streams.streamAddonInstanceId
 import com.nuvio.app.isIos
 import kotlinx.coroutines.launch
@@ -65,6 +68,7 @@ import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.stringResource
 
 private val playerControlsLog = Logger.withTag("PlayerControls")
+private val playerPerfLog = Logger.withTag("NuvioPerf")
 
 @Composable
 internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
@@ -77,13 +81,25 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
     val isInPip = rememberIsInPictureInPicture()
     remember { IgnoredStreamsRepository.ensureLoaded() }
     val ignoredEntries by IgnoredStreamsRepository.entries.collectAsStateWithLifecycle()
-    val displayedPositionMs = scrubbingPositionMs ?: playbackSnapshot.positionMs
+    val softIgnoredEntries by SoftIgnoredStreamsRepository.entries.collectAsStateWithLifecycle()
+    val displayedPositionMs by remember(runtime) {
+        derivedStateOf {
+            val rawPositionMs = runtime.scrubbingPositionMs ?: runtime.playbackSnapshot.positionMs
+            if (isDesktop) rawPositionMs else rawPositionMs / 1_000L * 1_000L
+        }
+    }
+    val playbackDurationMs by remember(runtime) {
+        derivedStateOf { runtime.playbackSnapshot.durationMs }
+    }
+    val isPlayingNow by remember(runtime) {
+        derivedStateOf { runtime.playbackSnapshot.isPlaying }
+    }
     val seasonNumber = activeSeasonNumber
     val episodeNumber = activeEpisodeNumber
     val episodeTitle = activeEpisodeTitle
     val isEpisode = seasonNumber != null && episodeNumber != null
 
-    LaunchedEffect(runtime.title, runtime.poster, seasonNumber, episodeNumber, episodeTitle, playbackSnapshot.isPlaying) {
+    LaunchedEffect(runtime.title, runtime.poster, seasonNumber, episodeNumber, episodeTitle, isPlayingNow) {
         val episodeLabel = if (isEpisode) {
             val base = "S${seasonNumber}E${episodeNumber}"
             if (!episodeTitle.isNullOrBlank()) "$base - $episodeTitle" else base
@@ -95,11 +111,20 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
                 title = runtime.title,
                 episodeLabel = episodeLabel,
                 posterUrl = runtime.poster,
-                isPlaying = playbackSnapshot.isPlaying,
+                isPlaying = isPlayingNow,
                 positionMs = playbackSnapshot.positionMs,
                 durationMs = playbackSnapshot.durationMs,
             ),
         )
+    }
+
+    // Debug latency probe: measures how long a surface tap takes to turn into visible controls,
+    // which separates "the tap is delayed" from "the frame/recomposition is slow".
+    LaunchedEffect(controlsVisible) {
+        if (!controlsVisible) return@LaunchedEffect
+        val mark = lastSurfaceTapMark ?: return@LaunchedEffect
+        lastSurfaceTapMark = null
+        playerPerfLog.i { "tap_to_controls_ms=${mark.elapsedNow().inWholeMilliseconds}" }
     }
 
     val currentGestureFeedback = liveGestureFeedback ?: gestureFeedback
@@ -152,12 +177,11 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
             nuvio.composeapp.generated.resources.Res.string.player_torrent_starting_engine,
         )
     }
-    val bufferedAheadMs = (playbackSnapshot.bufferedPositionMs - playbackSnapshot.positionMs)
-        .coerceAtLeast(0L)
     val p2pInitialLoadingProgress = when {
         !isP2pPlaybackActive || initialLoadCompleted || p2pStats == null -> null
         else -> p2pInitialLoadingProgress(
-            bufferedAheadMs = bufferedAheadMs,
+            bufferedAheadMs = (playbackSnapshot.bufferedPositionMs - playbackSnapshot.positionMs)
+                .coerceAtLeast(0L),
             downloadedBytes = p2pStats.downloadedBytes,
             deliveredBytes = p2pStats.deliveredBytes,
         )
@@ -219,21 +243,35 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
     }
     val allFilterLabel = stringResource(Res.string.collections_tab_all)
     val playingLabel = stringResource(Res.string.compose_player_playing)
-    val sourceFilters = buildPlayerControlFilters(
-        allLabel = allFilterLabel,
-        selectedFilter = null,
-    )
-    val sourceItems = buildPlayerControlSourceItems()
-    val episodeItems = buildPlayerControlEpisodeItems()
-    val episodeSeasons = buildPlayerControlSeasonItems(episodeItems)
-    val episodeStreamFilters = buildPlayerControlEpisodeStreamFilters(
-        allLabel = allFilterLabel,
-        selectedFilter = null,
-    )
-    val episodeStreamItems = buildPlayerControlEpisodeStreamItems()
-    val playerControlAddonSubtitles = buildPlayerControlAddonSubtitleItems()
-    val playerControlSubtitleSelection = buildPlayerControlSubtitleSelection()
-    val playerControlAutoSyncCues = buildPlayerControlSubtitleCueItems()
+    // Everything below only feeds the desktop control bridge (PlayerControlsState). Building it on
+    // Android/iOS re-mapped every episode, stream and subtitle on every recomposition for nothing.
+    val sourceFilters = if (isDesktop) {
+        buildPlayerControlFilters(
+            allLabel = allFilterLabel,
+            selectedFilter = null,
+        )
+    } else {
+        emptyList()
+    }
+    val sourceItems = if (isDesktop) buildPlayerControlSourceItems() else emptyList()
+    val episodeItems = if (isDesktop) buildPlayerControlEpisodeItems() else emptyList()
+    val episodeSeasons = if (isDesktop) buildPlayerControlSeasonItems(episodeItems) else emptyList()
+    val episodeStreamFilters = if (isDesktop) {
+        buildPlayerControlEpisodeStreamFilters(
+            allLabel = allFilterLabel,
+            selectedFilter = null,
+        )
+    } else {
+        emptyList()
+    }
+    val episodeStreamItems = if (isDesktop) buildPlayerControlEpisodeStreamItems() else emptyList()
+    val playerControlAddonSubtitles = if (isDesktop) buildPlayerControlAddonSubtitleItems() else emptyList()
+    val playerControlSubtitleSelection = if (isDesktop) {
+        buildPlayerControlSubtitleSelection()
+    } else {
+        PlayerControlSubtitleSelection(emptyList(), emptyList(), "__off__", "")
+    }
+    val playerControlAutoSyncCues = if (isDesktop) buildPlayerControlSubtitleCueItems() else emptyList()
     val themeColors = MaterialTheme.nuvio.colors
     val selectedEpisodeLabel = episodeStreamsPanelState.selectedEpisode?.let { selected ->
         val selectedCode = selected.playerControlsEpisodeCode()
@@ -248,7 +286,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
     val nativeSkipInterval = activeSkipInterval.takeIf {
         initialLoadCompleted && !pausedOverlayVisible && !skipIntervalDismissed
     }
-    val nativeSkipAction = nativeSkipInterval?.internalSkipAction(skipIntervals, playbackSnapshot.durationMs)
+    val nativeSkipAction = nativeSkipInterval?.internalSkipAction(skipIntervals, playbackDurationMs)
     val nextEpisodeForControls = nextEpisodeInfo.takeIf { 
         isSeries && (showNextEpisodeCard || nextEpisodeAutoPlaySearching || nextEpisodeAutoPlayCountdown != null) 
     }
@@ -303,16 +341,54 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
             title = chapter.title ?: stringResource(Res.string.compose_player_chapter_number, index + 1),
         )
     }
-    val currentQualityHeight = playbackSnapshot.videoHeight.takeIf { it > 0 }
-        ?: activeStream?.streamQuality()?.height
-    val qualityHeights = (
-        sourceStreamsState.groups.flatMap { it.streams }.mapNotNull { it.streamQuality().height } +
-            listOfNotNull(currentQualityHeight)
+    val emptyPlayerControlsState = remember { PlayerControlsState() }
+    val playerControlsState = if (isDesktop) {
+        val sourceQualityHeight = activeStream?.streamQuality()?.height
+        val renderedQualityHeight = playbackSnapshot.videoHeight.takeIf { it > 0 }
+        val currentQualityHeight = sourceQualityHeight ?: renderedQualityHeight
+        val detailsSpeedBytes = p2pStats?.downloadSpeed?.takeIf { it > 0L }
+            ?: playbackSnapshot.networkSpeedBytesPerSecond.takeIf { it > 0L }
+        val detailsFileSize = activeStream?.behaviorHints?.videoSize ?: 0L
+        val detailsDownloadProgress = p2pStats?.totalProgress
+            ?.takeIf { it > 0f }
+            ?.let { (it * 100).toInt() }
+        val detailsBufferedProgress = playbackSnapshot.durationMs.takeIf { it > 0L }?.let { duration ->
+            (playbackSnapshot.bufferedPositionMs.toFloat() / duration * 100f).toInt().takeIf { it > 0 }
+        }
+        val detailsStatus = when {
+            p2pConnecting != null -> stringResource(Res.string.player_status_connecting)
+            p2pStats != null -> stringResource(Res.string.player_status_streaming)
+            else -> stringResource(Res.string.player_status_playing)
+        }
+        val detailsProgressLabel = stringResource(
+            if (detailsDownloadProgress != null) Res.string.player_downloaded else Res.string.player_buffered,
         )
-        .filter { it > 0 }
-        .distinct()
-        .sortedDescending()
-    val playerControlsState = PlayerControlsState(
+        val detailsProgress = when {
+            detailsFileSize > 0L && detailsDownloadProgress != null ->
+                "${formatFileSize(p2pStats?.downloadedBytes ?: 0L)} / " +
+                    "${formatFileSize(detailsFileSize)} ($detailsDownloadProgress%)"
+            detailsBufferedProgress != null ->
+                "${formatDurationMs(playbackSnapshot.bufferedPositionMs)} / " +
+                    "${formatDurationMs(playbackSnapshot.durationMs)} ($detailsBufferedProgress%)"
+            else -> ""
+        }
+        val detailsFile = (
+            activeStream?.behaviorHints?.filename
+                ?: activeStream?.streamLabel
+                ?: activeStreamTitle.takeIf { it.isNotBlank() }
+            ).orEmpty()
+        val detailsProvider = (
+            activeStream?.addonName
+                ?: activeProviderName.takeIf { it.isNotBlank() }
+            ).orEmpty()
+        val qualityHeights = (
+            sourceStreamsState.groups.flatMap { it.streams }.mapNotNull { it.streamQuality().height } +
+                listOfNotNull(currentQualityHeight)
+            )
+            .filter { it > 0 }
+            .distinct()
+            .sortedDescending()
+        PlayerControlsState(
         chapters = controlChapters,
         chaptersLabel = stringResource(Res.string.compose_player_chapters),
         chaptersPanelTitle = stringResource(Res.string.compose_player_panel_chapters, chapters.size),
@@ -324,6 +400,26 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
         episodeText = episodeText,
         streamTitle = activeStreamTitle,
         providerName = activeProviderName,
+        streamDetails = PlayerControlStreamDetails(
+            title = stringResource(Res.string.player_stream_details),
+            currentFileLabel = stringResource(Res.string.player_current_file),
+            providerLabel = stringResource(Res.string.player_provider),
+            fileSizeLabel = stringResource(Res.string.player_file_size),
+            fileStatusLabel = stringResource(Res.string.player_file_status),
+            downloadedLabel = stringResource(Res.string.player_downloaded),
+            bufferedLabel = stringResource(Res.string.player_buffered),
+            downloadSpeedLabel = stringResource(Res.string.player_download_speed),
+            peersLabel = stringResource(Res.string.player_peers),
+            file = detailsFile,
+            provider = detailsProvider,
+            quality = currentQualityHeight?.let(::qualityLabel).orEmpty(),
+            size = detailsFileSize.takeIf { it > 0L }?.let(::formatFileSize).orEmpty(),
+            status = detailsStatus,
+            progressLabel = detailsProgressLabel,
+            progress = detailsProgress,
+            speed = detailsSpeedBytes?.let(::formatP2pSpeed) ?: "—",
+            peers = p2pStats?.peers?.takeIf { it > 0 }?.toString().orEmpty(),
+        ),
         pauseOverlayEnabled = playerSettingsUiState.pauseOverlayEnabled,
         pauseOverlayWatchingLabel = stringResource(Res.string.compose_player_youre_watching),
         pauseOverlayLogo = logo,
@@ -356,29 +452,66 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
         hdrPreferLabel = stringResource(Res.string.player_hdr_prefer),
         hdrSdrLabel = stringResource(Res.string.player_hdr_sdr),
         fileLabel = stringResource(Res.string.player_file),
-        ignoreFileLabel = stringResource(Res.string.player_ignore_file),
-        ignoreFileDescription = stringResource(Res.string.player_ignore_file_description),
-        ignoredFilesLabel = stringResource(Res.string.player_ignored_files_count, ignoredEntries.size),
-        ignoredFilesDescription = stringResource(Res.string.player_ignored_files_description),
-        ignoredFilesEmptyLabel = stringResource(Res.string.player_ignored_files_empty),
-        restoreLabel = stringResource(Res.string.player_restore),
-        fileIgnoredLabel = stringResource(Res.string.player_file_ignored),
-        fileRestoredLabel = stringResource(Res.string.player_file_restored),
+        ignoredFiles = PlayerControlIgnoredFiles(
+            label = stringResource(Res.string.player_ignored_files_count, ignoredEntries.size),
+            description = stringResource(Res.string.player_ignored_files_description),
+            emptyLabel = stringResource(Res.string.player_ignored_files_empty),
+            restoreLabel = stringResource(Res.string.player_restore),
+            fileIgnoredLabel = stringResource(Res.string.player_file_ignored),
+            fileRestoredLabel = stringResource(Res.string.player_file_restored),
+            ignoreFileLabel = stringResource(Res.string.player_ignore_file),
+            ignoreFileDescription = stringResource(Res.string.player_ignore_file_description),
+        ),
         qualityOptions = qualityHeights.map { height ->
             PlayerControlQualityOption(height = height, label = qualityLabel(height))
         },
         selectedQualityHeight = quickSettingsQualityOverride ?: 0,
         currentQualityHeight = currentQualityHeight ?: 0,
         hdrPreference = playerSettingsUiState.smartPlayHdrPreference.ordinal,
-        ignoredItems = ignoredEntries.map { entry ->
-            PlayerControlIgnoredItem(
-                label = entry.label,
-                subtitle = listOfNotNull(
-                    entry.addonName?.takeIf { it.isNotBlank() },
-                    entry.contentTitle?.takeIf { it.isNotBlank() },
-                ).joinToString(" · "),
-            )
-        },
+        ignoredItems = ignoredEntries
+            .filter { it.contentKey == activeVideoId }
+            .map { entry ->
+                PlayerControlIgnoredItem(
+                    label = entry.label,
+                    subtitle = listOfNotNull(
+                        entry.addonName?.takeIf { it.isNotBlank() },
+                        entry.contentLabel.takeIf { it.isNotBlank() }
+                            ?: entry.contentTitle?.takeIf { it.isNotBlank() },
+                    ).joinToString(" · "),
+                    addedAtLabel = if (entry.ignoredAtMs > 0L) {
+                        stringResource(
+                            Res.string.player_ignored_added_at,
+                            formatLocalDateTime(entry.ignoredAtMs),
+                        )
+                    } else {
+                        ""
+                    },
+                )
+            },
+        softIgnored = PlayerControlSoftIgnored(
+            title = stringResource(Res.string.player_soft_ignored_title),
+            description = stringResource(Res.string.player_soft_ignored_description),
+            clearLabel = stringResource(Res.string.player_soft_ignored_clear),
+            items = softIgnoredEntries
+                .filter { it.contentKey == activeVideoId }
+                .sortedByDescending { it.failedAtMs }
+                .map { entry ->
+                    PlayerControlIgnoredItem(
+                        label = entry.label.ifBlank { "Stream" },
+                        subtitle = listOfNotNull(
+                            entry.addonName?.takeIf { it.isNotBlank() },
+                            if (entry.failedAtMs > 0L) {
+                                stringResource(
+                                    Res.string.player_soft_ignored_failed_at,
+                                    formatLocalDateTime(entry.failedAtMs),
+                                )
+                            } else {
+                                null
+                            },
+                        ).joinToString(" · "),
+                    )
+                },
+        ),
         episodesLabel = stringResource(Res.string.compose_player_episodes),
         externalPlayerLabel = stringResource(Res.string.streams_open_external_player),
         playLabel = stringResource(Res.string.detail_btn_play),
@@ -588,7 +721,10 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
             stringResource(Res.string.player_next_episode_unaired)
         },
         nextEpisodePlayable = nextEpisodeInfo?.hasAired == true,
-    )
+        )
+    } else {
+        emptyPlayerControlsState
+    }
     val gestureCallbacks = rememberSurfaceGestureCallbacks()
     val fold = LocalFold.current?.takeIf { !isInPip }
     val videoModifier = if (fold != null) Modifier.fillMaxWidth().height(fold.top) else Modifier.fillMaxSize()
@@ -724,6 +860,11 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi() {
                     if (message != null && tryHandleQualitySwitchFailure()) {
                         return@PlatformPlayerSurface
                     }
+                    // A source that errors out (file removed, debrid still fetching, dead CDN) is
+                    // replaced automatically instead of asking the viewer to pick another one.
+                    if (message != null && failOverToNextSource()) {
+                        return@PlatformPlayerSurface
+                    }
                     errorMessage = message
                     if (message != null) {
                         scrubbingPositionMs = null
@@ -819,6 +960,28 @@ private fun PlayerScreenRuntime.RenderPlayerControls(
     val partyState by PartyRepository.state.collectAsStateWithLifecycle()
     val partyActive = partyState.party != null
     val playerBadges = if (isDesktop) emptyList() else rememberPlayerBadges()
+    val controlsSnapshot by remember(this) {
+        derivedStateOf {
+            val snapshot = playbackSnapshot
+            PlayerPlaybackSnapshot(
+                isLoading = snapshot.isLoading,
+                isPlaying = snapshot.isPlaying,
+                isEnded = snapshot.isEnded,
+                durationMs = snapshot.durationMs,
+                positionMs = if (isDesktop) {
+                    snapshot.positionMs
+                } else {
+                    snapshot.positionMs / 1_000L * 1_000L
+                },
+                bufferedPositionMs = if (isDesktop) {
+                    snapshot.bufferedPositionMs
+                } else {
+                    snapshot.bufferedPositionMs / 1_000L * 1_000L
+                },
+                playbackSpeed = snapshot.playbackSpeed,
+            )
+        }
+    }
     LaunchedEffect(folded) {
         if (folded) {
             controlsVisible = true
@@ -838,7 +1001,7 @@ private fun PlayerScreenRuntime.RenderPlayerControls(
             seasonNumber = activeSeasonNumber,
             episodeNumber = activeEpisodeNumber,
             episodeTitle = activeEpisodeTitle,
-            playbackSnapshot = playbackSnapshot,
+            playbackSnapshot = controlsSnapshot,
             displayedPositionMs = displayedPositionMs,
             metrics = metrics,
             resizeMode = resizeMode,
@@ -1124,8 +1287,12 @@ internal fun PlayerScreenRuntime.handlePlayerControlsEvent(type: String, value: 
             PlayerSettingsRepository.setSmartPlayHdrPreference(preference)
         }
         "ignoreFile" -> ignoreActiveFile()
+        "clearSoftIgnored" -> {
+            SoftIgnoredStreamsRepository.clearForContent(activeVideoId)
+            true
+        }
         "restoreIgnored" -> {
-            IgnoredStreamsRepository.entries.value
+            IgnoredStreamsRepository.entriesForContent(activeVideoId)
                 .getOrNull(value.toInt())
                 ?.let(IgnoredStreamsRepository::restore)
         }
@@ -1940,13 +2107,34 @@ private fun BoxScope.RenderPlaybackOverlays(
     suppressOpeningOverlay: Boolean,
     folded: Boolean,
 ) {
+    val overlaySnapshot by remember(runtime) {
+        derivedStateOf {
+            val snapshot = runtime.playbackSnapshot
+            PlayerPlaybackSnapshot(
+                isLoading = snapshot.isLoading,
+                isPlaying = snapshot.isPlaying,
+                isEnded = snapshot.isEnded,
+                durationMs = snapshot.durationMs,
+                positionMs = if (isDesktop) {
+                    snapshot.positionMs
+                } else {
+                    snapshot.positionMs / 1_000L * 1_000L
+                },
+                bufferedPositionMs = if (isDesktop) {
+                    snapshot.bufferedPositionMs
+                } else {
+                    snapshot.bufferedPositionMs / 1_000L * 1_000L
+                },
+            )
+        }
+    }
     runtime.run {
         PlayerPlaybackOverlays(
             playerControlsLocked = playerControlsLocked,
             useLegacyLayout = isDesktop || playerSettingsUiState.useLegacyPlayerLayout,
             lockedOverlayVisible = lockedOverlayVisible && !folded,
             showRemainingTime = showRemainingTime,
-            playbackSnapshot = playbackSnapshot,
+            playbackSnapshot = overlaySnapshot,
             displayedPositionMs = displayedPositionMs,
             metrics = metrics,
             horizontalSafePadding = horizontalSafePadding,
@@ -1960,11 +2148,22 @@ private fun BoxScope.RenderPlaybackOverlays(
             logo = logo,
             title = title,
             onBackWithProgress = { requestBack() },
+            onSourcesClick = if (activeVideoId != null) {
+                { openSourcesPanel() }
+            } else {
+                null
+            },
+            onEpisodesClick = if (isSeries) {
+                { openEpisodesPanel() }
+            } else {
+                null
+            },
+            onQuickSettingsClick = { openQuickSettings() },
             openingLoadingMessage = if (playerSettingsUiState.showPlayerLoadingStatus) {
                 p2pInitialLoadingMessage ?: playerLoadingStatusMessage(
                     showStatus = true,
                     controllerReady = playerController != null,
-                    buffering = playbackSnapshot.isLoading,
+                    buffering = overlaySnapshot.isLoading,
                 )
             } else null,
             p2pInitialLoadingProgress = p2pInitialLoadingProgress,
@@ -1976,7 +2175,7 @@ private fun BoxScope.RenderPlaybackOverlays(
             initialLoadCompleted = initialLoadCompleted,
             pausedOverlayVisible = pausedOverlayVisible,
             activeSkipInterval = activeSkipInterval.takeUnless { isDesktop },
-            skipsToPostCredits = activeSkipInterval?.internalSkipAction(skipIntervals, playbackSnapshot.durationMs)?.skipsToPostCredits == true,
+            skipsToPostCredits = activeSkipInterval?.internalSkipAction(skipIntervals, overlaySnapshot.durationMs)?.skipsToPostCredits == true,
             skipIntervalDismissed = skipIntervalDismissed,
             controlsVisible = controlsVisible,
             onSkipInterval = { interval -> skipInterval(interval) },
@@ -2025,13 +2224,16 @@ private fun qualityLabel(height: Int): String = when {
 
 @Composable
 private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMs: Long) {
+    val playbackDurationMs by remember(this) {
+        derivedStateOf { playbackSnapshot.durationMs }
+    }
     PlayerQuickSettingsPanel()
     PlayerIgnoredFilesPanel()
     PlayerChaptersPanel(
         visible = showChaptersPanel && chapters.isNotEmpty(),
         chapters = chapters,
         positionMs = displayedPositionMs,
-        durationMs = playbackSnapshot.durationMs,
+        durationMs = playbackDurationMs,
         onChapterSelected = { selectChapter(it) },
         onDismiss = {
             showChaptersPanel = false

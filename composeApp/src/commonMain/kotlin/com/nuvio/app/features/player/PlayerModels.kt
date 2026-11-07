@@ -300,6 +300,28 @@ data class PlayerPlaybackSnapshot(
     val playbackSpeed: Float = 1f,
     val videoWidth: Int = 0,
     val videoHeight: Int = 0,
+    val networkSpeedBytesPerSecond: Long = 0L,
+)
+
+private const val PlaybackUiPositionGranularityMs = 1_000L
+private const val PlaybackUiNetworkSpeedBucketBytes = 64 * 1024L
+
+/**
+ * Projection of an engine snapshot used for the Compose-observable playback state.
+ *
+ * Engines report a new snapshot on every frame (libmpv emits `time-pos` ~30-60 times per second).
+ * Writing each of those into a [androidx.compose.runtime.MutableState] invalidates every composable
+ * that reads it - on Android that is the whole player screen, which re-ran its full build (episode
+ * lists, stream lists, subtitle lists, resource lookups) dozens of times per second and left taps
+ * queued for seconds. The player chrome only ever renders whole seconds, so the observable snapshot
+ * is quantised down to one update per second; anything that needs the exact position reads
+ * [PlayerScreenRuntime.latestPlaybackSnapshot], which is not a Compose state.
+ */
+internal fun PlayerPlaybackSnapshot.forPlayerUi(): PlayerPlaybackSnapshot = copy(
+    positionMs = positionMs / PlaybackUiPositionGranularityMs * PlaybackUiPositionGranularityMs,
+    bufferedPositionMs = bufferedPositionMs / PlaybackUiPositionGranularityMs * PlaybackUiPositionGranularityMs,
+    networkSpeedBytesPerSecond =
+        networkSpeedBytesPerSecond / PlaybackUiNetworkSpeedBucketBytes * PlaybackUiNetworkSpeedBucketBytes,
 )
 
 data class PlayerNowPlayingInfo(
