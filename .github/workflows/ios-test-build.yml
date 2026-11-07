@@ -23,14 +23,12 @@ jobs:
   build:
     name: Build unsigned full ${{ inputs.configuration }} IPA
     # xcode-27 is a GitHub-hosted preview image carrying Xcode 27.1 / the iOS 27 SDK: the app's
-    ContentView.swift uses SwiftUI APIs that do not exist in the Xcode 16.4 SDK on macos-15.
+    # ContentView.swift uses SwiftUI APIs that do not exist in the Xcode 16.4 SDK on macos-15.
     runs-on: xcode-27
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
-    # The hosted macOS runner is far slower than the self-hosted xcode-27 machine: a Release
-    # build needs well over an hour of Xcode + Kotlin/Native time there.
+    # Generous ceiling - a Release build is well over an hour on hosted hardware.
     timeout-minutes: ${{ inputs.configuration == 'Release' && 240 || 90 }}
     env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
       GRADLE_OPTS: -Dfile.encoding=UTF-8
       IOS_CONFIGURATION: ${{ inputs.configuration }}
       KOTLIN_DAEMON_JVMARGS: -Xmx2048M
