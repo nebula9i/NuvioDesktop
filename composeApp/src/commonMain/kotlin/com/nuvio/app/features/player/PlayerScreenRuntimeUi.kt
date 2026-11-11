@@ -1872,6 +1872,9 @@ private fun PlayerScreenRuntime.isCurrentPlayerControlStream(stream: StreamItem)
     val activeKey = activeSourceIdentityKey
     val streamKey = stream.playerSourceIdentityKey()
     if (activeKey != null) {
+        // Exactly one row must match: the identity key is now URL-independent (see
+        // playerSourceIdentityKey), so a refresh keeps the highlight without widening the match
+        // to every row that happens to share a label.
         return streamKey == activeKey
     }
     val directUrl = stream.playableDirectUrl
@@ -2330,6 +2333,7 @@ private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMs: Long) {
         activeEpisodeTitle = activeEpisodeTitle,
         activeSourceUrl = activeSourceUrl,
         activeStreamTitle = activeStreamTitle,
+        activeSourceIdentityKey = activeSourceIdentityKey,
         onSourceFilterSelected = PlayerStreamsRepository::selectSourceFilter,
         onSourceStreamSelected = { stream ->
             clearQualitySwitchState()

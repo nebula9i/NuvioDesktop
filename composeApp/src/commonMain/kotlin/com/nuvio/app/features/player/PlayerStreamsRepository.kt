@@ -188,6 +188,9 @@ object PlayerStreamsRepository {
         clearEpisodeStreams()
     }
 
+    private fun contentKeyOf(requestKey: String?): String? =
+        requestKey?.substringBefore("::pluginsGrouped=")
+
     private fun fetchStreams(
         panelName: String,
         type: String,
@@ -222,9 +225,19 @@ object PlayerStreamsRepository {
         }
 
         log.d { "start $panelName request=$requestKey force=$forceRefresh previous=${current.streamDiagnostics()}" }
+        val sameContent = contentKeyOf(cachedKey) != null && contentKeyOf(cachedKey) == contentKeyOf(requestKey)
         setRequestKey(requestKey)
         jobHolder()?.cancel()
-        stateFlow.value = StreamsUiState()
+        // Same content refreshing: keep the rows that are already on screen while the new ones
+        // arrive. Resetting to an empty state here is what made the desktop sources panel flash to
+        // skeletons, jump the scroll and drop the "playing" highlight whenever a background
+        // refresh (stall downgrade, credential refresh, manual reload) kicked in. Different
+        // content still starts from a clean state so one episode never shows another's rows.
+        stateFlow.value = if (sameContent) {
+            current.copy(isAnyLoading = true, emptyStateReason = null)
+        } else {
+            StreamsUiState()
+        }
 
         val streamBadgeRules = StreamBadgeSettingsRepository.snapshot()
         val embeddedStreams = MetaDetailsRepository.findEmbeddedStreams(videoId)
@@ -305,18 +318,25 @@ object PlayerStreamsRepository {
             "targets $panelName request=$requestKey installed=${installedAddons.size} " +
                 "compatible=${streamAddons.size} plugins=${pluginScrapers.size}"
         }
+        // Carry the previous rows forward per provider so a refresh replaces them in place
+        // instead of collapsing the list to empty groups first.
+        val previousStreamsByAddon = if (sameContent) {
+            current.groups.associateBy { it.addonId }
+        } else {
+            emptyMap()
+        }
         val initialGroups = StreamAutoPlaySelector.orderAddonStreams(streamAddons.map { addon ->
             AddonStreamGroup(
                 addonName = addon.addonName,
                 addonId = addon.addonId,
-                streams = emptyList(),
+                streams = previousStreamsByAddon[addon.addonId]?.streams.orEmpty(),
                 isLoading = true,
             )
         } + pluginProviderGroups.map { providerGroup ->
             AddonStreamGroup(
                 addonName = providerGroup.addonName,
                 addonId = providerGroup.addonId,
-                streams = emptyList(),
+                streams = previousStreamsByAddon[providerGroup.addonId]?.streams.orEmpty(),
                 isLoading = true,
             )
         } + serverSources.map { it.loadingGroup() }, installedAddonOrder, preferredGroupIds)

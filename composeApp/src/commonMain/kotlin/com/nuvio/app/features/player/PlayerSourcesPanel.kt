@@ -31,6 +31,7 @@ fun PlayerSourcesPanel(
     currentEpisodeTitle: String?,
     currentStreamUrl: String?,
     currentStreamName: String?,
+    currentIdentityKey: String? = null,
     onFilterSelected: (String?) -> Unit,
     onStreamSelected: (StreamItem) -> Unit,
     onReload: () -> Unit,
@@ -95,6 +96,7 @@ fun PlayerSourcesPanel(
                 modifier = Modifier.weight(1f),
                 currentStreamUrl = currentStreamUrl,
                 currentStreamName = currentStreamName,
+                currentIdentityKey = currentIdentityKey,
                 currentLabel = stringResource(Res.string.compose_player_playing),
             )
         }
@@ -118,8 +120,11 @@ internal fun List<StreamItem>.stablePlayerKeys(): List<String> {
 internal fun StreamItem.isCurrentPlayerStream(
     currentUrl: String?,
     currentName: String?,
+    currentIdentityKey: String? = null,
 ): Boolean {
+    // Exact identity first: one row, and it keeps matching after a URL is re-signed.
+    if (!currentIdentityKey.isNullOrBlank()) return playerSourceIdentityKey() == currentIdentityKey
     if (!currentUrl.isNullOrBlank() && playableDirectUrl == currentUrl) return true
     return !currentName.isNullOrBlank() && streamLabel.equals(currentName, ignoreCase = true) &&
-        playableDirectUrl == currentUrl
+        !currentUrl.isNullOrBlank() && playableDirectUrl == currentUrl
 }

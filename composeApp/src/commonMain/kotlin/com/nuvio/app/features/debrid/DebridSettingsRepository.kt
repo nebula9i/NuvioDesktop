@@ -287,7 +287,13 @@ object DebridSettingsRepository {
             ?.id
             .orEmpty()
         normalizePreferredResolverProviderId(save = true)
-        enabled = (DebridSettingsStorage.loadEnabled() ?: false) && hasResolverProvider()
+        // A configured provider key with no stored on/off flag means the flag was never written
+        // (older builds only persisted it when the toggle was flipped): treat that as enabled
+        // instead of silently switching debrid off for a fully configured account. An explicit
+        // false still wins - setEnabled(false) always persists it.
+        val storedEnabled = DebridSettingsStorage.loadEnabled()
+            ?: providerApiKeys.isNotEmpty()
+        enabled = storedEnabled && hasResolverProvider()
         cloudLibraryEnabled = DebridSettingsStorage.loadCloudLibraryEnabled() ?: true
         instantPlaybackPreparationLimit = normalizeDebridInstantPlaybackPreparationLimit(
             DebridSettingsStorage.loadInstantPlaybackPreparationLimit() ?: 0,

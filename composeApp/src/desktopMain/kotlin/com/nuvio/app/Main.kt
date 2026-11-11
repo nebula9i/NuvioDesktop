@@ -61,6 +61,13 @@ fun main(args: Array<String>) {
     // machines where the temp directory is locked down and used to abort the composition.
     ImageIO.setUseCache(false)
     applyDesktopRendererPreference()
+    // Capture logcat-style diagnostics in a file: a jpackaged GUI app has no console.
+    runCatching {
+        co.touchlab.kermit.Logger.setLogWriters(
+            co.touchlab.kermit.platformLogWriter(),
+            com.nuvio.app.core.diagnostics.DesktopFileLogWriter,
+        )
+    }
     SentryInitializer.start()
     configureDesktopQuickJsLibrary()
     configureDesktopChrome()

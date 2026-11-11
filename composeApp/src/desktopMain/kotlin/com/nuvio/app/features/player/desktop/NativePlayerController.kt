@@ -451,6 +451,7 @@ internal class NativePlayerController(
             isFullscreen = isFullscreen,
             isInPip = DesktopPlayerPictureInPicture.isEnabled,
         )
+        logControlsDiagnostics(stateWithVolume, structureKey != lastSentControlsStructureKey)
         if (structureKey == lastSentControlsStructureKey) return
         lastSentControlsStructureKey = structureKey
         log.d {
@@ -460,6 +461,34 @@ internal class NativePlayerController(
                 "subsLabel=${stateWithVolume.subtitlesLabel} fullscreen=$isFullscreen"
         }
         NativePlayerBridge.updateControls(current, stateWithVolume.toControlsJson(isFullscreen, ::refreshControlsForImage))
+    }
+
+    private var diagLastItemsHash = 0
+    private var diagPushesSinceItemsChange = 0
+    private var diagLastHeartbeatMs = 0L
+
+    /**
+     * Probe for the sources-panel flicker: records whether the pushed source items actually
+     * change (which would make the WebView panel rebuild) and how often we push at all.
+     */
+    private fun logControlsDiagnostics(state: PlayerControlsState, pushed: Boolean) {
+        val itemsHash = state.sourceItems.hashCode()
+        diagPushesSinceItemsChange += 1
+        val changed = itemsHash != diagLastItemsHash
+        if (changed) diagLastItemsHash = itemsHash
+        val now = System.currentTimeMillis()
+        val heartbeat = now - diagLastHeartbeatMs >= 2000L
+        if (!changed && !(pushed && heartbeat)) return
+        val current = state.sourceItems.firstOrNull { it.isCurrent }
+        val first = state.sourceItems.firstOrNull()
+        com.nuvio.app.core.diagnostics.DesktopFileLogWriter.note(
+            "controls items=${state.sourceItems.size} hash=${itemsHash.toUInt()} changed=$changed " +
+                "pushesSinceChange=$diagPushesSinceItemsChange pushed=$pushed pos=${state.positionMs} " +
+                "loading=${state.sourceIsLoading} filters=${state.sourceFilters.size} " +
+                "current=${current?.label ?: "-"} first=${first?.label?.take(30) ?: "-"}"
+        )
+        if (changed) diagPushesSinceItemsChange = 0
+        if (heartbeat) diagLastHeartbeatMs = now
     }
 
     private fun refreshControlsForImage() {

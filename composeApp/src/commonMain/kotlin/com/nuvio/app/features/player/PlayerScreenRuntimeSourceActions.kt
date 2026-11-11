@@ -136,6 +136,23 @@ internal fun StreamItem.playerSourceIdentityKey(): String? {
         return "hash:$addonId:$hash:${behaviorHints.videoSize ?: ""}:${behaviorHints.filename.orEmpty()}"
     }
 
+    // Stable identity that survives a re-signed URL: a refresh hands the very same file a new
+    // link, and URL comparison is what made the "playing" highlight drop after a reload.
+    run {
+        val parts = listOf(
+            addonId,
+            clientResolve?.fileIdx?.toString().orEmpty(),
+            p2pFileIdx?.toString().orEmpty(),
+            behaviorHints.filename.orEmpty(),
+            behaviorHints.videoSize?.toString().orEmpty(),
+            streamLabel,
+            streamSubtitle.orEmpty(),
+        ).map(String::trim)
+        if (parts.any { it.isNotBlank() }) {
+            return "stable:" + parts.joinToString("|")
+        }
+    }
+
     playableDirectUrl?.trim()?.takeIf { it.isNotBlank() }?.let { url ->
         return "url:$url"
     }

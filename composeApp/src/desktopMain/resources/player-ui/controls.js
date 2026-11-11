@@ -467,6 +467,8 @@ let pressedButton = null;
 let focusedActionCommand = "";
 let sourceFilterId = "";
 let sourceVirtualKey = "";
+let sourceModalSignature = "";
+let sourceRenderCount = 0;
 let sourceVirtualItems = [];
 let sourceVirtualHeights = [];
 let sourceVirtualOffsets = [];
@@ -1165,6 +1167,7 @@ const openPlayerModal = modal => {
   if (modal === "subtitles") {
     resetSubtitleSelectionState();
   }
+  if (modal === "sources") sourceModalSignature = "";
   renderActiveModal(modal === "chapters");
   modalElements.forEach(modalElement => {
     setModalVisibility(modalElement, modalElement === targetModal);
@@ -2003,19 +2006,48 @@ const requestSourceVirtualRender = () => {
 };
 
 const renderSourceModal = (modalOpened = false) => {
+  const filters = normalizeItems(state.sourceFilters);
+  if (sourceFilterId && !filters.some(filter => String(filter.id || "") === sourceFilterId)) {
+    sourceFilterId = "";
+  }
+  let items = normalizeItems(state.sourceItems);
+  if (sourceFilterId) {
+    items = items.filter(item => String(item.filterId || "") === sourceFilterId);
+  }
+  // Every controls state push used to tear this panel down and rebuild it - sourceList was
+  // cleared unconditionally - which is the flicker and the scroll jumps it showed while playback
+  // kept ticking. Only touch the DOM when something this panel actually renders has changed.
+  const nextSignature = JSON.stringify([
+    state.sourcesPanelTitle,
+    state.reloadLabel,
+    state.panelCloseLabel,
+    state.episodeText,
+    state.title,
+    state.sourceIsLoading,
+    state.noStreamsLabel,
+    state.sourceFilters,
+    sourceFilterId,
+    items,
+  ]);
+  if (nextSignature === sourceModalSignature) {
+    return;
+  }
+  sourceModalSignature = nextSignature;
+
   sourcePanelTitle.textContent = state.sourcesPanelTitle || "Sources";
+  // Probe: the rebuild counter is shown in the panel title, so a screenshot tells us whether the
+  // panel is really rebuilding during a flicker (it only advances when this code actually runs).
+  sourceRenderCount += 1;
+  sourcePanelTitle.textContent += " \u00b7 r" + sourceRenderCount;
   sourceReloadButton.textContent = state.reloadLabel || "Reload";
   sourceCloseButton.textContent = state.panelCloseLabel || "Close";
   sourceContextLabel.textContent = state.episodeText || state.title || "";
   sourceContextLabel.hidden = !sourceContextLabel.textContent;
 
-  const filters = normalizeItems(state.sourceFilters);
-  if (sourceFilterId && !filters.some(filter => String(filter.id || "") === sourceFilterId)) {
-    sourceFilterId = "";
-  }
   renderFilterRow(sourceFilterList, filters, sourceFilterId, id => {
     sourceFilterId = id;
     sourceList.scrollTop = 0;
+    sourceModalSignature = "";
     renderSourceModal(true);
   });
 
@@ -2026,12 +2058,9 @@ const renderSourceModal = (modalOpened = false) => {
     });
   }
 
+  const previousScrollTop = sourceList.scrollTop;
   sourceList.textContent = "";
   sourceList.classList.remove("virtualized");
-  let items = normalizeItems(state.sourceItems);
-  if (sourceFilterId) {
-    items = items.filter(item => String(item.filterId || "") === sourceFilterId);
-  }
   if (items.length === 0) {
     sourceVirtualItems = [];
     sourceVirtualSpacer = null;
@@ -2044,18 +2073,36 @@ const renderSourceModal = (modalOpened = false) => {
     return;
   }
   const nextKey = sourceKeyForItems(items);
-  if (nextKey !== sourceVirtualKey) {
+  const sameKey = nextKey === sourceVirtualKey;
+  // A source arriving appends to the list (index+label of what is already shown stays put):
+  // keep the measured heights and the scroll position instead of rebuilding from scratch, which
+  // used to yank the panel back to the top for every single result that trickled in.
+  const growsStably =
+    !sameKey &&
+    sourceVirtualItems.length > 0 &&
+    items.length > sourceVirtualItems.length &&
+    sourceVirtualItems.every((prev, i) => prev.index === items[i].index && prev.label === items[i].label);
+  if (sameKey) {
+    sourceVirtualItems = items;
+  } else if (growsStably) {
+    const keptHeights = sourceVirtualHeights.slice();
+    sourceVirtualKey = nextKey;
+    sourceVirtualItems = items;
+    sourceVirtualHeights = items.map((_, i) =>
+      keptHeights[i] == null ? SourceRowEstimatedHeight : keptHeights[i]);
+  } else {
     resetSourceVirtualState(items, nextKey);
     sourceList.scrollTop = 0;
-  } else {
-    sourceVirtualItems = items;
   }
   sourceList.classList.add("virtualized");
   sourceVirtualSpacer = document.createElement("div");
   sourceVirtualSpacer.className = "source-virtual-spacer";
   sourceList.appendChild(sourceVirtualSpacer);
   rebuildSourceVirtualLayout();
-  requestSourceVirtualRender();
+  if (sameKey || growsStably) sourceList.scrollTop = previousScrollTop;
+  // Render synchronously: scheduling a frame here meant the cleared list got painted before the
+  // rows came back - one blank flash per redraw, which is what the flicker actually was.
+  renderSourceVirtualRows();
 };
 
 const appendEpisodeRow = (container, item) => {
